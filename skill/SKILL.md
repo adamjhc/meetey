@@ -376,6 +376,6 @@ the menu bar item, not these.
 | Blank or garbled transcript | Check Screen Recording permission in System Settings → Privacy & Security |
 | Chrome captures wrong audio | Mute other tabs playing audio before starting the recording |
 | No keyframes captured | The recording must be started with screen capture opted in; check `capturingVideo` via `get_status` |
-| Too many near-identical keyframes | Pass a higher `sceneThreshold` to `start_recording` (default 12). Narrowing to one window with `windowID` usually helps more, since it removes the app's other windows from the frame |
+| Too many near-identical keyframes | Pass a higher `sceneThreshold` to `start_recording` (default 12). `windowID` will not help — it does not narrow the frame |
 | Keyframes captured only from part of the meeting | Screen capture picks one window or display for the whole session. If the meeting moved to another window or screen, re-record with the right `windowID`/`displayID` |
 | Keyframes missing a slide that was on screen | Lower `sceneThreshold`. A slide differing by only a word or two moves few enough grid cells to fall under the default |

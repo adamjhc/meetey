@@ -532,7 +532,7 @@ Artifacts land in `~/.meetey/recordings/<session>-frames/` with an `index.json` 
 
 ScreenCaptureKit captures **audio** at the process level. When targeting Chrome, all Chrome audio is captured — not just the meeting tab. Users should mute other tabs playing audio before starting a recording.
 
-For **video**, `--window` narrows capture to a single window, which keeps the app's other windows and its notification banners out of frame. It cannot go finer: there is no tab-level capture on macOS, so whatever tab the captured window is showing is what gets captured, including after a tab switch. Isolating one tab means dragging it into its own window.
+For **video**, `--window` narrows nothing — it only names which display the meeting is on. Screen capture covers everything the app displays: its other windows and its notification banners included. Nor can it go finer than an app: there is no tab-level capture on macOS, so every tab in every captured window is in frame, including after a tab switch. Isolating one tab means a separate browser profile or app, not a separate window.
 
 **Camera-heavy calls no longer burn the frame budget.** A moving video tile is masked as volatile and a tile that never settles is never persisted, so the slide-plus-speaker-tile layout yields about one keyframe per slide. A call that is *only* faces still produces little of value — audio-only remains the right choice there — but it no longer exhausts `--max-frames` in the first few minutes and go dark for the rest of the meeting.
 

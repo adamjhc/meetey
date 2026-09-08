@@ -63,8 +63,8 @@ function enable() {
   green("Watcher running, and it can see your windows");
   console.log(`
 Meetey will now ask before recording when it notices a meeting in Chrome, Zoom,
-or Teams. The prompt offers audio only or audio + screen, and screen capture
-covers just the meeting window.
+or Teams. The prompt offers audio only or audio + screen; screen capture covers
+everything that app displays — other tabs, other windows, notification banners.
 
 It starts nothing without you choosing to.
 
