@@ -763,10 +763,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "list_windows",
       description:
-        "List the capturable windows of a meeting app, with the title of each. Use this to let the " +
-        "user narrow screen capture to just the meeting window, which excludes the app's other " +
-        "windows and its notification banners. ScreenCaptureKit cannot capture an individual " +
-        "browser tab — window is the finest available granularity.",
+        "List the capturable windows of a meeting app, with the title of each. Two uses, neither " +
+        "of them narrowing the capture: the title labels the menu bar indicator, and the window " +
+        "says which display the meeting is on. Screen capture always covers everything the app " +
+        "displays, and ScreenCaptureKit cannot capture an individual browser tab at all.",
       inputSchema: {
         type: "object",
         properties: {
@@ -789,7 +789,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description:
         "Turn the meeting watcher on. It installs a login agent that persists across restarts " +
         "until disabled, so only call this when the user has actually asked for it — never to " +
-        "be helpful after a missed recording. It records audio only, and always asks first.",
+        "be helpful after a missed recording. It always asks first, and the prompt offers " +
+        "audio only or audio + screen — screen capture covers everything the app displays.",
       inputSchema: { type: "object", properties: {} },
     },
     {
@@ -845,10 +846,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           autoStop: {
             type: "boolean",
             description:
-              "End the recording by itself when the app quits, or when the window given as " +
-              "windowID closes (default true, after a 30s grace period). It never tries to " +
-              "infer that a call ended while the app is still running. Pass false to require " +
-              "an explicit stop_recording.",
+              "End the recording by itself when the app quits (default true, after a 30s " +
+              "grace period). It watches the app, never a window — a closed window costs " +
+              "screen content and nothing else, and stopping for one killed live meetings. " +
+              "It never tries to infer that a call ended while the app is still running; " +
+              "that is stopWhenCallEnds. Pass false to require an explicit stop_recording.",
           },
           stopAfter: {
             type: "number",

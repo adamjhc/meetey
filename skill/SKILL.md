@@ -56,14 +56,26 @@ Meetey — local meeting capture
    > Also capture screen content (slides, screen shares, code)? This captures **everything [App Name] displays** — including other tabs, windows, and notifications — so mute or close anything sensitive first. Audio-only is the default. [y/N]
 
    Never skip this question when the user hasn't answered it, and never assume yes. Screen capture is opt-in for every single recording — there is no setting that turns it on permanently, by design.
-6. **If the user opted into screen capture, work out which display.** Call `list_displays`; when it returns one, pick it silently. When more than one is attached, call `list_windows` and ask which window the meeting is in — that answer picks the display, and matters only because getting it wrong records the wrong screen.
+6. **If the user opted into screen capture, call `list_windows` for the chosen app and `list_displays`.**
 
-   **Screen capture is not narrowed to a window.** It covers everything the app displays. Scoping to a window was tried and repeatedly cost recordings: replacing a captured window — which Google Meet does when you join a call — kills the whole capture, audio included. Never offer window selection as a privacy control.
+   **Which window** — one: take its title silently, since a question with one answer is not a question. More than one: ask which the meeting is in. None returned (`list_windows` drops windows under 100px, so a minimized one disappears): carry on with no window, and there is nothing to infer a display from.
 
-7. Call `start_recording` with the chosen `bundleID`, `captureVideo: true` only if the user explicitly opted in, and `windowID`/`displayID` when the user chose them. Pass `label` too — the window title if one was listed, otherwise the app name — so the menu bar indicator names what it is recording rather than saying "Meeting".
-8. Confirm to the user: "Recording started[, capturing screen content from <window title>]. Stop it from the menu bar, with `/meetey stop`, or with `Ctrl+Shift+S`."
+   Call `list_windows` even on a single display. The window title is what gives the menu bar indicator a real name; without it the only continuously-visible sign that recording is happening says "Chrome", which identifies nothing.
 
-The recording also ends itself if the app quits, or if the chosen window closes — so forgetting to stop costs a little disk, not a runaway recording. Don't advertise this as "it knows when your meeting ends": it does not detect a call ending while the app keeps running, and saying otherwise would leave someone expecting a stop that never comes.
+   **Which display** — one: take it silently. **More than one: never pick silently.** Say which display you are about to capture and why, and let the user redirect in the same breath:
+
+   > Two displays. Your "Weekly Sync" window is on the 3840×2160 one — capture that? (The other is the main display, 1728×1117.) [Y/n]
+
+   Identify displays by size and by which is `isMain`, never by `displayID` — `list_displays` returns no names, and a number nobody can map to a physical screen is not a choice. With no window to infer from, ask outright and lead with the main display.
+
+   **Capturing the wrong screen costs the entire session** — every keyframe is of something else, and nobody finds out until the notes are written. That asymmetry is why this confirmation earns a line of chat while audio-only asks nothing at all.
+
+   **Asking which window does not narrow the capture.** It covers everything the app displays. Scoping to a window was tried and repeatedly cost recordings: replacing a captured window — which Google Meet does when you join a call — kills the whole capture, audio included. The question buys a label and a display, nothing more — never present it as a privacy control, and don't let the phrasing imply one.
+
+7. Call `start_recording` with the chosen `bundleID`, `captureVideo: true` only if the user explicitly opted in, and both `windowID` and `displayID` whenever screen capture is on and you have them. Pass both: an explicit `displayID` takes precedence over the display inferred from the window, so a user who redirected in step 6 gets the screen they asked for. Pass `label` too — the window title if one was listed, otherwise the app name — so the menu bar indicator names what it is recording rather than saying "Meeting".
+8. Confirm to the user: "Recording <window title>[, capturing everything <App Name> displays]. Stop it from the menu bar, with `/meetey stop`, or with `Ctrl+Shift+S`." Name the window as what is *being recorded*, never as the bounds of what is captured.
+
+The recording also ends itself when the call ends or the app quits — so forgetting to stop costs a little disk, not a runaway recording. **Closing the window does not end it**: audio is app-scoped and survives the window, and stopping for a closed window destroyed live meetings, because Google Meet replaces its window when you join. Don't advertise this as "it knows when your meeting ends": it does not detect a call ending while the app keeps running, and saying otherwise would leave someone expecting a stop that never comes.
 
 **Chrome note:** Chrome captures all tab audio, not just the meeting tab. Close other tabs playing audio or mute them before starting.
 

@@ -212,9 +212,9 @@ function askToRecord(window) {
   const title = (window.title ?? "").slice(0, 90);
   const message =
     `Meetey noticed a meeting in ${app}:\n\n${title}\n\n` +
-    `Record it? "${AUDIO_AND_SCREEN}" captures only this window. It stops on ` +
-    `its own when the call ends; run /meetey stop in Claude Code to write up ` +
-    `the notes.`;
+    `Record it? "${AUDIO_AND_SCREEN}" captures everything ${app} displays — ` +
+    `other tabs, other windows, notification banners. It stops on its own when ` +
+    `the call ends; run /meetey stop in Claude Code to write up the notes.`;
 
   // The default is the *safe* option, not the affirmative one. This alert
   // appears unprompted and can take focus mid-call, so an absent-minded Return
@@ -294,9 +294,11 @@ function startRecording(window, mode) {
   mkdirSync(RECORDINGS_DIR, { recursive: true });
 
   // Screen capture is still consented to per recording — the agent offers, the
-  // person chooses, in the same dialog that authorises the audio. And it scopes
-  // to the window the watcher actually detected, which is narrower than what
-  // /meetey start captures by default.
+  // person chooses, in the same dialog that authorises the audio. It captures
+  // exactly what /meetey start does: everything the app displays. `--window` is
+  // only a hint for which display the meeting is on (main.swift), so the dialog
+  // must not offer it as a narrowing — saying "only this window" promised a
+  // privacy control that no code path delivers.
   const args = [
     "--app", window.bundleID,
     "--output", outputPath,

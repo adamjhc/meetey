@@ -2383,8 +2383,8 @@ Task {
 
                 Options:
                   --stop-after <seconds>    Stop automatically after this long
-                  --auto-stop               Stop when the app quits, or when the
-                                            window given to --window closes
+                  --auto-stop               Stop when the app quits. Watches the app,
+                                            never a window
                   --auto-stop-grace <secs>  How long that must hold before
                                             stopping (default 30)
                   --stop-when-call-ends     Also stop when the meeting app releases

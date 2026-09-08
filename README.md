@@ -148,11 +148,11 @@ That assessment is computed from the transcript itself (fragment rate, whisper l
 
 | App | Audio captured | Screen captured (opt-in) |
 |-----|----------------|--------------------------|
-| Chrome | All Chrome audio | One chosen window, or everything Chrome displays |
-| Zoom | Zoom meeting audio | The Zoom window, including screen shares |
-| Microsoft Teams (desktop) | Teams meeting audio | The Teams window, including screen shares |
+| Chrome | All Chrome audio | Everything Chrome displays |
+| Zoom | Zoom meeting audio | Everything Zoom displays, including screen shares |
+| Microsoft Teams (desktop) | Teams meeting audio | Everything Teams displays, including screen shares |
 
-> **Chrome note:** **audio** is captured at the **process** level — all Chrome audio, not just the meeting tab — so mute any other tabs playing audio before starting. For **screen** capture you can narrow to a single window, which excludes the app's other windows and its notification banners. You cannot narrow to a tab: macOS offers no tab-level capture, so whatever tab that window is showing is what gets captured.
+> **Chrome note:** both audio and screen are captured at the **app** level. Audio means all Chrome audio, not just the meeting tab — so mute any other tabs playing audio before starting. Screen means everything Chrome displays: other tabs, other windows, notification banners. Naming a window when you start only tells Meetey which display the meeting is on; it does not narrow the capture, and there is no tab-level capture on macOS at all.
 
 ## Screen capture
 
@@ -227,9 +227,10 @@ While it's on you'll see a quiet dotted circle in the menu bar — deliberately 
 │                                              │
 │  Weekly Sync — Google Meet                   │
 │                                              │
-│  Record it? "Audio + screen" captures only   │
-│  this window. It stops on its own when the   │
-│  call ends.                                  │
+│  Record it? "Audio + screen" captures        │
+│  everything Chrome displays — other tabs,    │
+│  other windows, notification banners. It     │
+│  stops on its own when the call ends.        │
 │                                              │
 │   [ Skip ]  [ Audio + screen ]  [ Audio only ]│
 └──────────────────────────────────────────────┘
@@ -365,10 +366,10 @@ To switch, download the model to `~/.meetey/models/` and set `MEETEY_MODEL` in t
 | MCP tools not available after install | Restart Claude Code — MCP servers connect at session startup |
 | `Ctrl+Shift+S` does nothing mid-meeting | It's a Claude Code shortcut, not a system-wide hotkey — it only fires when Claude Code is focused. Stop from the menu bar instead |
 | No screen content in the notes | Screen capture is opt-in per meeting — start with `/meetey start --video` |
-| Too many near-identical keyframes | Narrow to one window when you start; failing that, raise `--scene-threshold` |
+| Too many near-identical keyframes | Raise `--scene-threshold` (more cells needed to count as a new scene) |
 | Slide changes missed | Lower `--scene-threshold` (fewer cells needed to count as a new scene) |
 | Keyframe text is garbled | Confirm the meeting window isn't scaled down; OCR runs on the captured resolution |
-| Keyframes from the wrong screen | Pass a `displayID`, or pick a window — Meetey otherwise guesses from where the app is |
+| Keyframes from the wrong screen | On more than one display `/meetey start` names the screen it is about to capture and takes a correction — say the other one. It only guesses silently when you have a single display |
 | Recording stopped early | It ends when your call ends or the app quits. Closing a window does not end it |
 | Recording didn't stop when the call ended | Only fires if the app took the microphone in the first place — joining by phone while sharing your screen leaves nothing to detect. It falls back to stopping when the app quits |
 | `/meetey stop` says no recording is active | If it already stopped itself, `/meetey stop` still collects it. If that fails, the WAV is in `~/.meetey/recordings/` |
