@@ -334,7 +334,7 @@ a silent or empty recording rather than an error, so it is the likeliest cause o
 "meetey recorded nothing" complaint.
 
 If asked about recording meetings automatically, describe what actually exists: an
-optional watcher (`/meetey watch on`, or `npx jej2k5/meetey watch enable` in a terminal —
+optional watcher (`/meetey watch on`, or `npx adamjhc/meetey watch enable` in a terminal —
 there is no bare `meetey` command on PATH) that notices meetings in Chrome,
 Zoom, and Teams and **asks** before recording, offering audio only or audio + screen. It is off until enabled and
 never records on its own. A recording ends when the call ends or the app quits, and the
@@ -358,8 +358,8 @@ the menu bar item, not these.
 
 | Problem | Fix |
 |---|---|
-| "meetey-capture binary not found" | Run `npx jej2k5/meetey install` |
-| "Whisper model not found" | Run `npx jej2k5/meetey install` |
+| "meetey-capture binary not found" | Run `npx adamjhc/meetey install` |
+| "Whisper model not found" | Run `npx adamjhc/meetey install` |
 | App not listed | Ensure the meeting app is open and a call is active |
 | Blank or garbled transcript | Check Screen Recording permission in System Settings → Privacy & Security |
 | Chrome captures wrong audio | Mute other tabs playing audio before starting the recording |

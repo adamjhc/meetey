@@ -136,7 +136,7 @@ function listApps() {
   if (busy) return busy;
 
   if (!existsSync(CAPTURE_BINARY)) {
-    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx jej2k5/meetey install` };
+    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx adamjhc/meetey install` };
   }
   try {
     const output = runCaptureBinary(["--list-apps"]);
@@ -155,7 +155,7 @@ function listDisplays() {
   if (busy) return busy;
 
   if (!existsSync(CAPTURE_BINARY)) {
-    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx jej2k5/meetey install` };
+    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx adamjhc/meetey install` };
   }
   try {
     const displays = JSON.parse(runCaptureBinary(["--list-displays"]).trim());
@@ -169,7 +169,7 @@ function listWindows({ bundleID } = {}) {
   const busy = refuseWhileRecording("Listing windows");
   if (busy) return busy;
   if (!existsSync(CAPTURE_BINARY)) {
-    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx jej2k5/meetey install` };
+    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx adamjhc/meetey install` };
   }
   try {
     const args = ["--list-windows"];
@@ -254,7 +254,7 @@ function startRecording({
     };
   }
   if (!existsSync(CAPTURE_BINARY)) {
-    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx jej2k5/meetey install` };
+    return { error: `meetey-capture binary not found at ${CAPTURE_BINARY}. Run: npx adamjhc/meetey install` };
   }
 
   const id = sessionId();
@@ -512,7 +512,7 @@ function transcribe({ wavPath: filePath }) {
     return { error: `WAV file not found: ${filePath}` };
   }
   if (!existsSync(MODEL_PATH)) {
-    return { error: `Whisper model not found at ${MODEL_PATH}. Run: npx jej2k5/meetey install` };
+    return { error: `Whisper model not found at ${MODEL_PATH}. Run: npx adamjhc/meetey install` };
   }
 
   // A capture that was killed before finalising leaves every sample on disk
@@ -720,10 +720,10 @@ function adminStatus() {
         updateAvailable: compareVersions(cached.latest, installed) > 0,
         checkedAt: cached.checkedAt,
         hint: compareVersions(cached.latest, installed) > 0
-          ? `Meetey ${cached.latest} is available — run: npx jej2k5/meetey update`
+          ? `Meetey ${cached.latest} is available — run: npx adamjhc/meetey update`
           : undefined,
       }
-    : { installed, latest: null, updateAvailable: false, note: "Run `npx jej2k5/meetey status` to check for updates." };
+    : { installed, latest: null, updateAvailable: false, note: "Run `npx adamjhc/meetey status` to check for updates." };
 
   return {
     ...base,

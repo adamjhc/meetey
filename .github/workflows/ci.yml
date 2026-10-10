@@ -1,0 +1,70 @@
+# Checks every push, and publishes a GitHub Release for every v* tag.
+#
+# A release is what `npx adamjhc/meetey install|update` installs (see
+# cli/release.js), so a tag only becomes a release after the same checks pass.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      - name: Build meetey-capture
+        working-directory: meetey-capture
+        run: swift build -c release
+
+      - name: Capture selftest
+        working-directory: meetey-capture
+        run: .build/release/meetey-capture --selftest
+
+      - name: Watcher selftest
+        run: node daemon/watch.js --selftest
+
+      # Run the packaged artifact, not the checkout: a file missing from
+      # `files` in package.json only shows up here (see CLAUDE.md, Packaging).
+      - name: Packaged MCP server answers tools/list
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          npm pack --silent --pack-destination "$RUNNER_TEMP/pack"
+          tar xzf "$RUNNER_TEMP"/pack/*.tgz -C "$RUNNER_TEMP/pack"
+          cd "$RUNNER_TEMP/pack/package"
+          (cd mcp-server && npm install --silent --ignore-scripts)
+          node daemon/watch.js --selftest
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | node mcp-server/index.js > tools.json
+          grep -q '"start_recording"' tools.json
+
+  release:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes

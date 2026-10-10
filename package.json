@@ -6,11 +6,11 @@
   "author": "John Joseph",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jej2k5/meetey.git"
+    "url": "git+https://github.com/adamjhc/meetey.git"
   },
-  "homepage": "https://github.com/jej2k5/meetey#readme",
+  "homepage": "https://github.com/adamjhc/meetey#readme",
   "bugs": {
-    "url": "https://github.com/jej2k5/meetey/issues"
+    "url": "https://github.com/adamjhc/meetey/issues"
   },
   "bin": {
     "meetey": "./cli/index.js"

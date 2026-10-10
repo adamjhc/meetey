@@ -405,13 +405,13 @@ export function systemStatus({ recordingsDir, captureBinary, modelPath, claudeJs
   const withVideo = library.filter((r) => r.hasVideo).length;
 
   const install = {
-    captureBinary: check(binaryOk, binaryOk ? captureBinary : "run: npx jej2k5/meetey install"),
-    codeSigned: check(signed === true, signed === false ? "run: npx jej2k5/meetey update" : null),
+    captureBinary: check(binaryOk, binaryOk ? captureBinary : "run: npx adamjhc/meetey install"),
+    codeSigned: check(signed === true, signed === false ? "run: npx adamjhc/meetey update" : null),
     whisperCli: check(Boolean(whisper), whisper ?? "run: brew install whisper-cpp"),
-    whisperModel: check(existsSync(modelPath), existsSync(modelPath) ? modelPath : "run: npx jej2k5/meetey install"),
-    mcpRegistered: check(mcpRegistered, mcpRegistered ? null : "run: npx jej2k5/meetey install"),
-    skillInstalled: check(existsSync(skillPath), existsSync(skillPath) ? skillPath : "run: npx jej2k5/meetey install"),
-    hotkeys: check(hotkeys, hotkeys ? "Ctrl+Shift+R / Ctrl+Shift+S" : "run: npx jej2k5/meetey install"),
+    whisperModel: check(existsSync(modelPath), existsSync(modelPath) ? modelPath : "run: npx adamjhc/meetey install"),
+    mcpRegistered: check(mcpRegistered, mcpRegistered ? null : "run: npx adamjhc/meetey install"),
+    skillInstalled: check(existsSync(skillPath), existsSync(skillPath) ? skillPath : "run: npx adamjhc/meetey install"),
+    hotkeys: check(hotkeys, hotkeys ? "Ctrl+Shift+R / Ctrl+Shift+S" : "run: npx adamjhc/meetey install"),
     screenRecordingPermission: permission,
   };
 

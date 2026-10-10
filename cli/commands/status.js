@@ -34,7 +34,7 @@ export async function status() {
 
   // Binary
   const binaryOk = existsSync(BINARY_PATH);
-  check("meetey-capture binary", binaryOk, binaryOk ? BINARY_PATH : "run: npx jej2k5/meetey install");
+  check("meetey-capture binary", binaryOk, binaryOk ? BINARY_PATH : "run: npx adamjhc/meetey install");
 
   // Binary signature
   if (binaryOk) {
@@ -42,7 +42,7 @@ export async function status() {
       execFileSync("codesign", ["--verify", BINARY_PATH], { stdio: "ignore" });
       check("binary code-signed", true);
     } catch {
-      check("binary code-signed", false, "run: npx jej2k5/meetey update");
+      check("binary code-signed", false, "run: npx adamjhc/meetey update");
     }
   }
 
@@ -53,7 +53,7 @@ export async function status() {
 
   // Model
   const modelOk = existsSync(MODEL_PATH);
-  check("Whisper model (ggml-base.en.bin)", modelOk, modelOk ? MODEL_PATH : "run: npx jej2k5/meetey install");
+  check("Whisper model (ggml-base.en.bin)", modelOk, modelOk ? MODEL_PATH : "run: npx adamjhc/meetey install");
 
   // Watch agent — optional, and off unless deliberately enabled.
   const watchInstalled = existsSync(WATCH_SCRIPT);
@@ -62,13 +62,13 @@ export async function status() {
   const watchNote = watchEnabled
     ? "on — asks before recording"
     : watchInstalled
-      ? "off — enable: npx jej2k5/meetey watch enable"
+      ? "off — enable: npx adamjhc/meetey watch enable"
       : "off — run update to install it";
   console.log(`  \x1b[2m\u25cb\x1b[0m  meeting watcher (optional)  \x1b[2m(${watchNote})\x1b[0m`);
 
   // MCP server
   const serverOk = existsSync(`${SERVER_DIR}/index.js`);
-  check("MCP server files", serverOk, serverOk ? SERVER_DIR : "run: npx jej2k5/meetey install");
+  check("MCP server files", serverOk, serverOk ? SERVER_DIR : "run: npx adamjhc/meetey install");
 
   // MCP registration
   let mcpRegistered = false;
@@ -78,11 +78,11 @@ export async function status() {
       mcpRegistered = !!claude?.mcpServers?.meetey;
     } catch {}
   }
-  check("MCP server registered in ~/.claude.json", mcpRegistered, mcpRegistered ? "" : "run: npx jej2k5/meetey install");
+  check("MCP server registered in ~/.claude.json", mcpRegistered, mcpRegistered ? "" : "run: npx adamjhc/meetey install");
 
   // Skill
   const skillOk = existsSync(SKILL_PATH);
-  check("/meetey skill installed", skillOk, skillOk ? SKILL_PATH : "run: npx jej2k5/meetey install");
+  check("/meetey skill installed", skillOk, skillOk ? SKILL_PATH : "run: npx adamjhc/meetey install");
 
   // Keybindings
   let hotkeysOk = false;
@@ -92,7 +92,7 @@ export async function status() {
       hotkeysOk = bindings.some(b => b.action === "sendMessage" && b.value?.includes("meetey"));
     } catch {}
   }
-  check("Claude Code shortcuts", hotkeysOk, hotkeysOk ? "Ctrl+Shift+R / Ctrl+Shift+S, while Claude Code is focused" : "run: npx jej2k5/meetey install");
+  check("Claude Code shortcuts", hotkeysOk, hotkeysOk ? "Ctrl+Shift+R / Ctrl+Shift+S, while Claude Code is focused" : "run: npx adamjhc/meetey install");
 
   await reportVersion();
 }
@@ -116,7 +116,7 @@ async function reportVersion() {
   // Free, and catches an update that was started and did not finish — the CLI
   // you are running is newer than what it put on disk.
   if (running && installed !== running) {
-    yellow(`  this package is ${running} — run: npx jej2k5/meetey update`);
+    yellow(`  this package is ${running} — run: npx adamjhc/meetey update`);
     return;
   }
 
@@ -130,7 +130,7 @@ async function reportVersion() {
 
   if (update.updateAvailable) {
     yellow(`  update available: ${installed} → ${update.latest}`);
-    console.log("    npx jej2k5/meetey update");
+    console.log("    npx adamjhc/meetey update");
   } else if (update.error) {
     // Not a failure worth shouting about; the check is a convenience.
     console.log(`  couldn't check for updates (${update.error})`);

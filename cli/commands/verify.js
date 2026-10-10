@@ -33,7 +33,7 @@ import { resolveWhisper } from "../../mcp-server/whisper.js";
  */
 export function verify({ quiet = false } = {}) {
   if (!existsSync(BINARY_PATH)) {
-    red("meetey-capture is not installed. Run: npx jej2k5/meetey install");
+    red("meetey-capture is not installed. Run: npx adamjhc/meetey install");
     return false;
   }
 
@@ -71,7 +71,7 @@ export function verify({ quiet = false } = {}) {
   if (existsSync(MODEL_PATH)) {
     green(`  ✓ Whisper model  ${MODEL_PATH}`);
   } else {
-    red(`  ✗ Whisper model  missing at ${MODEL_PATH} — run: npx jej2k5/meetey install`);
+    red(`  ✗ Whisper model  missing at ${MODEL_PATH} — run: npx adamjhc/meetey install`);
     problems.push("the Whisper model is missing");
   }
 

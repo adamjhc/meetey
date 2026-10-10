@@ -18,31 +18,34 @@
 const [,, command, ...args] = process.argv;
 
 const HELP = `
-Usage: npx jej2k5/meetey <command>
+Usage: npx adamjhc/meetey <command>
 
 Commands:
   install   Install meetey — builds the Swift binary, downloads the Whisper
             model, registers the MCP server and /meetey skill in Claude Code
   update    Rebuild the Swift binary and refresh the MCP server and skill
+            (install and update always use the latest tagged release)
   status    Show what's installed and whether everything is wired up correctly
   verify    Prove this machine can record and transcribe, by doing both
   watch     Watch for meetings and offer to record them
             (enable | disable | status | logs)
 
 Examples:
-  npx jej2k5/meetey install
-  npx jej2k5/meetey update
-  npx jej2k5/meetey status
-  npx jej2k5/meetey watch enable
+  npx adamjhc/meetey install
+  npx adamjhc/meetey update
+  npx adamjhc/meetey status
+  npx adamjhc/meetey watch enable
 `;
 
 switch (command) {
   case "install": {
+    await (await import("./release.js")).runFromLatestRelease(command, args);
     const { install } = await import("./commands/install.js");
     await install();
     break;
   }
   case "update": {
+    await (await import("./release.js")).runFromLatestRelease(command, args);
     const { update } = await import("./commands/update.js");
     await update();
     break;

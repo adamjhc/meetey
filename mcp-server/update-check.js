@@ -35,7 +35,9 @@ import { get } from "https";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 
-const RELEASES_URL = "https://api.github.com/repos/jej2k5/meetey/releases/latest";
+/** The repository releases come from. `install` and `update` pin to its tags. */
+export const REPO = "adamjhc/meetey";
+const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
 /** Retried sooner than a success, but not on every invocation — an offline
  *  laptop should not attempt a lookup every time someone runs `status`. */

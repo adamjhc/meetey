@@ -32,6 +32,17 @@ export async function install() {
   if (major < 13) { red(`Meetey requires macOS 13+. You have ${ver}.`); process.exit(1); }
   green(`macOS ${ver} — OK`);
 
+  // --- Claude Code ---
+  // Not fatal: recording and transcription work without it. But the skill,
+  // the MCP server and the live panel all run through it, and whichever
+  // account it is logged in to is the one meeting text is sent to.
+  step("Checking Claude Code");
+  if (which("claude")) {
+    green(`Claude Code found at ${which("claude")} — \`/status\` inside it shows which account it uses`);
+  } else {
+    yellow("Claude Code not found. Install it (https://claude.com/claude-code) and log in before using /meetey.");
+  }
+
   // --- Homebrew ---
   step("Checking Homebrew");
   if (!which("brew")) {
@@ -93,7 +104,7 @@ export async function install() {
   step("Installing the watch agent");
   if (existsSync(join(PKG_DIR, "daemon"))) {
     cpSync(join(PKG_DIR, "daemon"), DAEMON_DIR, { recursive: true, force: true });
-    green(`Watch agent installed to ${DAEMON_DIR} (off until: npx jej2k5/meetey watch enable)`);
+    green(`Watch agent installed to ${DAEMON_DIR} (off until: npx adamjhc/meetey watch enable)`);
   } else {
     yellow("Watch agent not present in this package — skipping (the watcher will be unavailable)");
   }

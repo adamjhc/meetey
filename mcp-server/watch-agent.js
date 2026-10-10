@@ -204,7 +204,7 @@ export function watchStatus({ meeteyDir, home }) {
  * reproduce, since it needs a real LaunchAgent and a revoked permission.
  */
 export function watchMessage({ available, installed, running, canSeeWindows }) {
-  if (!available) return "The watch agent is not installed. Run: npx jej2k5/meetey update";
+  if (!available) return "The watch agent is not installed. Run: npx adamjhc/meetey update";
   if (installed && running && canSeeWindows === false) {
     return "The watcher is running but cannot see any windows — it will never notice a meeting. " +
       "Node needs Screen Recording permission in System Settings → Privacy & Security.";
@@ -218,10 +218,10 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary }) {
   const paths = watchPaths({ meeteyDir, home });
 
   if (!existsSync(paths.scriptPath)) {
-    return { error: `Watch agent not found at ${paths.scriptPath}. Run: npx jej2k5/meetey update` };
+    return { error: `Watch agent not found at ${paths.scriptPath}. Run: npx adamjhc/meetey update` };
   }
   if (captureBinary && !existsSync(captureBinary)) {
-    return { error: `meetey-capture binary not found at ${captureBinary}. Run: npx jej2k5/meetey install` };
+    return { error: `meetey-capture binary not found at ${captureBinary}. Run: npx adamjhc/meetey install` };
   }
 
   try {

@@ -11,7 +11,7 @@ Recording, transcription, and OCR are all local; no third-party meeting service 
 ## Setup
 
 ```bash
-npx jej2k5/meetey install
+npx adamjhc/meetey install
 ```
 
 This builds the Swift binary, downloads the Whisper model, copies the MCP server and skill to `~/.meetey/`, registers the MCP server in `~/.claude.json`, and adds Claude Code shortcuts.
@@ -20,10 +20,10 @@ This builds the Swift binary, downloads the Whisper model, copies the MCP server
 
 | Command | Purpose |
 |---|---|
-| `npx jej2k5/meetey install` | First-time setup (or `node cli/index.js install` from a local clone) |
-| `npx jej2k5/meetey update` | Rebuild binary, refresh MCP server and skill |
-| `npx jej2k5/meetey status` | Show what's installed and whether everything is wired up |
-| `npx jej2k5/meetey watch enable\|disable\|status\|logs` | Control the meeting watcher (also `/meetey watch` from Claude Code) |
+| `npx adamjhc/meetey install` | First-time setup (or `node cli/index.js install` from a local clone) |
+| `npx adamjhc/meetey update` | Rebuild binary, refresh MCP server and skill |
+| `npx adamjhc/meetey status` | Show what's installed and whether everything is wired up |
+| `npx adamjhc/meetey watch enable\|disable\|status\|logs` | Control the meeting watcher (also `/meetey watch` from Claude Code) |
 | `swift build -c release` | Rebuild the Swift capture binary (run inside `meetey-capture/`) |
 | `.build/release/meetey-capture --selftest` | Keyframe pipeline + auto-stop, no permission needed |
 | `node daemon/watch.js --selftest` | Meeting-detection patterns |
@@ -74,7 +74,7 @@ The admin tools were reachable by natural language from the start; the subcomman
 ## The watch agent
 
 **`daemon/watch.js`** — a launchd LaunchAgent that notices meetings and *asks*
-whether to record them. Off until `npx jej2k5/meetey watch enable`; `disable`, `status`, and
+whether to record them. Off until `npx adamjhc/meetey watch enable`; `disable`, `status`, and
 `logs` round out the CLI (`cli/commands/watch.js`).
 
 **A meeting's identity is its window *and* its normalised title**, not the window
@@ -378,7 +378,29 @@ local-only and not committed — so treat the four rules above as the record.
 
 **`docs/video-capture-plan.md`** — Design rationale for screen capture. Read before changing the keyframe pipeline.
 
-**`cli/`** — The `meetey` CLI (`bin` entry in `package.json`). **The `bin` entry does not put `meetey` on anyone's PATH**: install runs through `npx`, which executes from its own cache and links nothing. Every user-facing instruction must therefore say `npx jej2k5/meetey <cmd>`; a bare `meetey watch enable` is "command not found". The CLI's own help printed the bare form for two releases. `index.js` dispatches to `commands/install.js`, `commands/update.js`, and `commands/status.js`; `paths.js` holds every install path in one place. `install` checks the macOS version, installs whisper-cpp via Homebrew, downloads `ggml-base.en.bin`, builds and code-signs the Swift binary, installs the MCP server and skill, and adds Claude Code shortcuts.
+**`cli/`** — The `meetey` CLI (`bin` entry in `package.json`). **The `bin` entry does not put `meetey` on anyone's PATH**: install runs through `npx`, which executes from its own cache and links nothing. Every user-facing instruction must therefore say `npx adamjhc/meetey <cmd>`; a bare `meetey watch enable` is "command not found". The CLI's own help printed the bare form for two releases. `index.js` dispatches to `commands/install.js`, `commands/update.js`, and `commands/status.js`; `paths.js` holds every install path in one place. `install` checks the macOS version, installs whisper-cpp via Homebrew, downloads `ggml-base.en.bin`, builds and code-signs the Swift binary, installs the MCP server and skill, and adds Claude Code shortcuts.
+
+## Releases
+
+This is a fork of `jej2k5/meetey`; releases come from **`adamjhc/meetey`**
+(`REPO` in `mcp-server/update-check.js`). `install` and `update` call
+`runFromLatestRelease` (`cli/release.js`) first: if the running package is not
+the latest release, it re-runs itself via `npx -y github:adamjhc/meetey#v<tag>`.
+The default branch can be ahead of the last release, and a machine that records
+real meetings must only ever get released code. It is skipped in a git checkout,
+with `MEETEY_NO_UPDATE_CHECK=1`, and (with a warning) when the lookup fails.
+
+To release, from a clean `main`:
+
+```bash
+npm version <x.y.z>          # bumps package.json, commits, tags v<x.y.z>
+git push --follow-tags
+```
+
+`.github/workflows/ci.yml` runs the selftests and the packaged-artifact check on
+every push; on a `v*` tag it also checks the tag matches `package.json` and only
+then publishes the GitHub Release that `update` looks for. A tag whose checks
+fail never becomes a release.
 
 ## Packaging
 
@@ -414,7 +436,7 @@ behaviour.
 
 `meetey-capture --verify` performs an actual short capture and checks permission,
 stream start, bytes reaching disk, and that the header stayed current mid-write.
-`npx jej2k5/meetey verify` adds whisper and the model, and install and update both
+`npx adamjhc/meetey verify` adds whisper and the model, and install and update both
 run it and refuse to claim success when it fails.
 
 This exists because the selftests cover logic and pass reliably while every failure

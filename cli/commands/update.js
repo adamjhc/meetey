@@ -24,7 +24,7 @@ import { registerMcpServer, installSkill, registerKeybindings } from "./install.
 export async function update() {
   // --- Verify installed ---
   if (!existsSync(BINARY_PATH)) {
-    red("meetey-capture binary not found. Run: npx jej2k5/meetey install");
+    red("meetey-capture binary not found. Run: npx adamjhc/meetey install");
     process.exit(1);
   }
 
@@ -58,7 +58,7 @@ export async function update() {
   step("Installing the watch agent");
   if (existsSync(join(PKG_DIR, "daemon"))) {
     cpSync(join(PKG_DIR, "daemon"), DAEMON_DIR, { recursive: true, force: true });
-    green(`Watch agent installed to ${DAEMON_DIR} (off until: npx jej2k5/meetey watch enable)`);
+    green(`Watch agent installed to ${DAEMON_DIR} (off until: npx adamjhc/meetey watch enable)`);
   } else {
     yellow("Watch agent not present in this package — skipping (the watcher will be unavailable)");
   }

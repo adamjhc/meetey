@@ -2,6 +2,8 @@
 
 # Meetey
 
+> **This is a fork** of [jej2k5/meetey](https://github.com/jej2k5/meetey), adding a live in-call assistant — see [docs/live-assistant-plan.md](docs/live-assistant-plan.md). Install and update commands below point at this fork, and always install its latest tagged release.
+
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)](#requirements)
 
@@ -14,7 +16,7 @@ Recording and transcription happen entirely on your machine. No subscriptions, n
 Requires macOS 13+, Node.js 18+, and Xcode Command Line Tools.
 
 ```bash
-npx jej2k5/meetey install
+npx adamjhc/meetey install
 ```
 
 This will:
@@ -26,6 +28,8 @@ This will:
 - Add shortcuts inside Claude Code (`Ctrl+Shift+R` / `Ctrl+Shift+S`)
 
 After installation, open System Settings → Privacy & Security → Screen Recording and enable your terminal app. Then start a new Claude Code session.
+
+`install` and `update` always install the **latest tagged release**, even when run from newer code on the default branch, so unreleased work never reaches a machine you record meetings on. From a git clone (`node cli/index.js install`) they use the clone as-is.
 
 ## Usage
 
@@ -215,7 +219,7 @@ Meetey can watch for meetings and offer to record them, so you don't have to thi
 /meetey watch log     What it has noticed
 ```
 
-Or from a terminal: `npx jej2k5/meetey watch enable | disable | status | log`.
+Or from a terminal: `npx adamjhc/meetey watch enable | disable | status | log`.
 
 While it's on you'll see a quiet dotted circle in the menu bar — deliberately unlike the solid red dot that means recording, so the two are never confused. It sits still; it only moves when something actually changes, and it steps aside entirely while a recording is running so the red indicator has the bar to itself.
 
@@ -282,15 +286,15 @@ Nothing records without a person saying so. `/meetey start` is explicit, and the
 ## CLI
 
 ```bash
-npx jej2k5/meetey install         # First-time setup
-npx jej2k5/meetey update          # Rebuild, refresh, restart the watcher, and verify
-npx jej2k5/meetey status          # Show what's installed and whether everything is wired up
-npx jej2k5/meetey verify          # Prove this machine can record and transcribe
+npx adamjhc/meetey install         # First-time setup
+npx adamjhc/meetey update          # Rebuild, refresh, restart the watcher, and verify
+npx adamjhc/meetey status          # Show what's installed and whether everything is wired up
+npx adamjhc/meetey verify          # Prove this machine can record and transcribe
 
-npx jej2k5/meetey watch enable    # Watch for meetings and offer to record them
-npx jej2k5/meetey watch disable   # Stop watching
-npx jej2k5/meetey watch status    # Is the watcher running?
-npx jej2k5/meetey watch log       # Recent watcher activity
+npx adamjhc/meetey watch enable    # Watch for meetings and offer to record them
+npx adamjhc/meetey watch disable   # Stop watching
+npx adamjhc/meetey watch status    # Is the watcher running?
+npx adamjhc/meetey watch log       # Recent watcher activity
 ```
 
 `status` output:
@@ -302,7 +306,7 @@ Meetey status
   ✔  binary code-signed
   ✔  whisper-cli  (/opt/homebrew/bin/whisper-cli)
   ✔  Whisper model (ggml-base.en.bin)  (~/.meetey/models/ggml-base.en.bin)
-  ○  meeting watcher (optional)  (off — enable: npx jej2k5/meetey watch enable)
+  ○  meeting watcher (optional)  (off — enable: npx adamjhc/meetey watch enable)
   ✔  MCP server files  (~/.meetey/mcp-server)
   ✔  MCP server registered in ~/.claude.json
   ✔  /meetey skill installed
@@ -312,7 +316,7 @@ Meetey status
 ### Checking it works
 
 ```bash
-npx jej2k5/meetey verify
+npx adamjhc/meetey verify
 ```
 
 Records for a few seconds and checks the whole path: Screen Recording permission, that the stream delivers audio, that it reaches the file, that the file stays readable while being written, and that whisper and its model are present. Install and update run it automatically and tell you plainly if the machine cannot record.
@@ -321,12 +325,12 @@ Worth running after any macOS update, or whenever a recording looks wrong.
 
 ### Staying current
 
-`npx jej2k5/meetey status` tells you whether a newer version has been released:
+`npx adamjhc/meetey status` tells you whether a newer version has been released:
 
 ```
   installed: 1.4.1
   update available: 1.4.1 → 1.5.0
-    npx jej2k5/meetey update
+    npx adamjhc/meetey update
 ```
 
 This is the only part of Meetey that contacts a server. It's an anonymous request for the repository's latest release tag — nothing about you or your machine is sent, and the answer is a version string. The result is cached for a day, times out after two seconds, and is skipped silently if you're offline. `MEETEY_NO_UPDATE_CHECK=1` turns it off entirely.
@@ -357,8 +361,8 @@ To switch, download the model to `~/.meetey/models/` and set `MEETEY_MODEL` in t
 
 | Problem | Fix |
 |---------|-----|
-| `meetey-capture binary not found` | Run `npx jej2k5/meetey install` |
-| `Whisper model not found` | Run `npx jej2k5/meetey install` |
+| `meetey-capture binary not found` | Run `npx adamjhc/meetey install` |
+| `Whisper model not found` | Run `npx adamjhc/meetey install` |
 | App not listed by `/meetey start` | Ensure the meeting app is open and a call is active |
 | Blank or garbled transcript | Check Screen Recording permission: System Settings → Privacy & Security → Screen Recording |
 | Chrome captures wrong audio | Mute other tabs playing audio before starting |
@@ -428,7 +432,7 @@ node ~/.meetey/daemon/watch.js --selftest   # meeting detection patterns
 Issues and pull requests are welcome. To work on Meetey from a local clone:
 
 ```bash
-git clone https://github.com/jej2k5/meetey.git
+git clone https://github.com/adamjhc/meetey.git
 cd meetey
 node cli/index.js install     # build, sign, and register everything locally
 ```
