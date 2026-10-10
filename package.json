@@ -1,6 +1,6 @@
 {
   "name": "meetey",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Local-first meeting capture and transcription for Claude Code",
   "type": "module",
   "author": "John Joseph",
@@ -37,6 +37,12 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["claude", "mcp", "meeting", "transcription", "whisper"],
+  "keywords": [
+    "claude",
+    "mcp",
+    "meeting",
+    "transcription",
+    "whisper"
+  ],
   "license": "Apache-2.0"
 }
