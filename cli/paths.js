@@ -17,6 +17,9 @@
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+// One definition, shared with the MCP server, so the CLI and the server can
+// never disagree about the agent's label.
+import { WATCH_LABEL } from "../mcp-server/watch-agent.js";
 
 export const HOME      = homedir();
 export const PKG_DIR   = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,7 +42,7 @@ export const SKILL_PATH     = join(HOME, ".claude", "skills", "meetey", "SKILL.m
 export const CLAUDE_JSON    = join(HOME, ".claude.json");
 export const KEYBINDINGS    = join(HOME, ".claude", "keybindings.json");
 
-export const WATCH_LABEL    = "com.meetey.watch";
+export { WATCH_LABEL };
 export const WATCH_PLIST    = join(HOME, "Library", "LaunchAgents", `${WATCH_LABEL}.plist`);
 export const WATCH_SCRIPT   = join(DAEMON_DIR, "watch.js");
 

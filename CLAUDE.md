@@ -403,6 +403,14 @@ The default branch can be ahead of the last release, and a machine that records
 real meetings must only ever get released code. It is skipped in a git checkout,
 with `MEETEY_NO_UPDATE_CHECK=1`, and (with a warning) when the lookup fails.
 
+Every reverse-DNS identifier uses the **`com.adamjhcox.meetey`** prefix: the
+app bundle (`com.adamjhcox.meetey`), its menu bar items (`.recording`,
+`.watching`), the watcher's launchd label (`.watch`) and dispatch queues. The
+product name stays `meetey` (`/meetey`, `~/.meetey`, the package). Agents
+installed under the old `com.meetey.watch` label are removed by
+`removeLegacyWatch` on every enable, disable and update, and `update` carries an
+enabled old agent over to the new label.
+
 To release, from a clean `main`:
 
 ```bash

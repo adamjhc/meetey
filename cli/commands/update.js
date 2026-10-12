@@ -73,9 +73,12 @@ export async function update() {
   // agent therefore does not fix anything — the old code keeps running, and the
   // user reasonably believes they are on the new version. This is how a
   // recording-killing bug survived being fixed.
-  const { watchStatus, enableWatch } = await import("../../mcp-server/watch-agent.js");
+  const { watchStatus, enableWatch, removeLegacyWatch } = await import("../../mcp-server/watch-agent.js");
   const watchCtx = { meeteyDir: MEETEY_DIR, home: HOME };
-  if (watchStatus(watchCtx).enabled) {
+  // Before 2.1.4 the agent was com.meetey.watch. Moving it to the new label
+  // counts as "enabled", or the rename would quietly switch the watcher off.
+  const hadLegacyWatch = removeLegacyWatch(watchCtx);
+  if (hadLegacyWatch || watchStatus(watchCtx).enabled) {
     step("Restarting the watch agent on the new code");
     const restarted = enableWatch({
       ...watchCtx,

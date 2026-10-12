@@ -315,7 +315,7 @@ final class KeyframeWriter {
     private let ocrEnabled: Bool
     private let startedAt: Date
 
-    private let workQueue = DispatchQueue(label: "com.meetey.keyframes", qos: .utility)
+    private let workQueue = DispatchQueue(label: "com.adamjhcox.meetey.keyframes", qos: .utility)
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private let colorSpace = CGColorSpaceCreateDeviceRGB()
 
@@ -1136,8 +1136,12 @@ final class WatcherIndicator: NSObject {
     @objc private func stopWatching() {
         // Same two steps as `disableWatch`: unload the agent, then remove the
         // plist so it does not return at next login.
+        // The label is the plist's name, so it can't drift from the one the
+        // agent was installed under.
         let uid = String(getuid())
-        run("/bin/launchctl", ["bootout", "gui/\(uid)/com.meetey.watch"])
+        let label = plistPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
+            ?? "com.adamjhcox.meetey.watch"
+        run("/bin/launchctl", ["bootout", "gui/\(uid)/\(label)"])
         if let plistPath { try? FileManager.default.removeItem(atPath: plistPath) }
         NSStatusBar.system.removeStatusItem(item)
         exit(0)

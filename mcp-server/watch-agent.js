@@ -30,7 +30,14 @@ import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 
-export const WATCH_LABEL = "com.meetey.watch";
+export const WATCH_LABEL = "com.adamjhcox.meetey.watch";
+
+/**
+ * Labels earlier versions installed the agent under. Removed whenever the
+ * watcher is enabled or disabled: launchd would happily run an old-label agent
+ * next to the new one, and two watchers means two prompts for every meeting.
+ */
+const LEGACY_WATCH_LABELS = ["com.meetey.watch"];
 
 export function watchPaths({ meeteyDir, home }) {
   return {
@@ -153,21 +160,38 @@ function plistBody({ nodePath, scriptPath, logPath }) {
 `;
 }
 
-function isLoaded() {
+function isLoaded(label = WATCH_LABEL) {
   try {
-    execFileSync("launchctl", ["print", `gui/${process.getuid()}/${WATCH_LABEL}`], { stdio: "ignore" });
+    execFileSync("launchctl", ["print", `gui/${process.getuid()}/${label}`], { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
 }
 
-function bootout() {
+function bootout(label = WATCH_LABEL) {
   try {
-    execFileSync("launchctl", ["bootout", `gui/${process.getuid()}/${WATCH_LABEL}`], { stdio: "ignore" });
+    execFileSync("launchctl", ["bootout", `gui/${process.getuid()}/${label}`], { stdio: "ignore" });
   } catch {
     // Not loaded, which is the state we were aiming for anyway.
   }
+}
+
+/**
+ * Unloads and deletes any agent installed under a legacy label. Returns whether
+ * one was there, so `update` can carry an enabled watcher across the rename
+ * instead of silently leaving it off.
+ */
+export function removeLegacyWatch({ home }) {
+  let found = false;
+  for (const label of LEGACY_WATCH_LABELS) {
+    const plistPath = join(home, "Library", "LaunchAgents", `${label}.plist`);
+    if (!existsSync(plistPath) && !isLoaded(label)) continue;
+    found = true;
+    bootout(label);
+    try { unlinkSync(plistPath); } catch { /* already gone */ }
+  }
+  return found;
 }
 
 export function watchStatus({ meeteyDir, home }) {
@@ -236,6 +260,7 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary }) {
     }));
 
     // Replace any previous version rather than stacking two agents.
+    removeLegacyWatch({ home });
     bootout();
     execFileSync("launchctl", ["bootstrap", `gui/${process.getuid()}`, paths.plistPath], { stdio: "ignore" });
   } catch (e) {
@@ -287,6 +312,7 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary }) {
 export function disableWatch({ meeteyDir, home }) {
   const paths = watchPaths({ meeteyDir, home });
   try {
+    removeLegacyWatch({ home });
     bootout();
     if (existsSync(paths.plistPath)) unlinkSync(paths.plistPath);
   } catch (e) {

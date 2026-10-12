@@ -425,7 +425,7 @@ node ~/.meetey/daemon/watch.js --selftest   # meeting detection patterns
 | `~/.meetey/state/watch-health.json` | Whether the watcher can currently see your windows |
 | `~/.meetey/state/update-check.json` | Cached result of the daily release check |
 | `~/.meetey/logs/watch.log` | Watcher activity (only when enabled) |
-| `~/Library/LaunchAgents/com.meetey.watch.plist` | Watcher login agent (only when enabled) |
+| `~/Library/LaunchAgents/com.adamjhcox.meetey.watch.plist` | Watcher login agent (only when enabled) |
 
 ## Contributing
 
