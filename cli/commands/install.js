@@ -15,12 +15,12 @@
  */
 
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, cpSync, writeFileSync, readFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, cpSync, writeFileSync, readFileSync, unlinkSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { green, yellow, red, step, run, which, downloadFile } from "../utils.js";
 import {
   PKG_DIR, MEETEY_DIR, MODELS_DIR, RECORDINGS_DIR,
-  SERVER_DIR, DAEMON_DIR, CAPTURE_DIR, BINARY_PATH, MODEL_PATH, MODEL_URL,
+  SERVER_DIR, DAEMON_DIR, CAPTURE_DIR, BINARY_PATH, BUILT_BINARY, APP_BUNDLE, MODEL_PATH, MODEL_URL,
   SKILL_PATH, CLAUDE_JSON, KEYBINDINGS,
 } from "../paths.js";
 
@@ -73,21 +73,8 @@ export async function install() {
   }
 
   // --- Build Swift binary ---
-  step("Building meetey-capture");
   mkdirSync(RECORDINGS_DIR, { recursive: true });
-  cpSync(join(PKG_DIR, "meetey-capture"), CAPTURE_DIR, { recursive: true, force: true });
-  run("swift build -c release", { cwd: CAPTURE_DIR });
-  green("Swift build complete");
-
-  // --- Code-sign ---
-  step("Code-signing meetey-capture");
-  execFileSync("codesign", [
-    "--force", "--sign", "-",
-    "--options", "runtime",
-    "--entitlements", join(CAPTURE_DIR, "entitlements.plist"),
-    BINARY_PATH,
-  ]);
-  green(`Signed: ${BINARY_PATH}`);
+  buildCaptureApp();
 
   // --- Copy MCP server ---
   step("Installing MCP server");
@@ -138,6 +125,42 @@ export async function install() {
   } else {
     yellow("Meetey is installed, but this machine cannot record yet — fix the above first.");
   }
+}
+
+/**
+ * Builds meetey-capture, wraps it in ~/.meetey/Meetey.app and signs the bundle.
+ *
+ * The bundle is there for the menu bar indicators. A bare executable's status
+ * item has no app identity, and macOS (and menu bar managers built on it, like
+ * Thaw or Ice) will not keep such an item shown or remember where it goes — it
+ * disappears whenever other icons are hidden. Inside a bundle with a
+ * CFBundleIdentifier it is an app like any other and can be pinned.
+ *
+ * Rebuilt from scratch each time so nothing from an older layout survives.
+ */
+export function buildCaptureApp() {
+  step("Building meetey-capture");
+  cpSync(join(PKG_DIR, "meetey-capture"), CAPTURE_DIR, { recursive: true, force: true });
+  run("swift build -c release", { cwd: CAPTURE_DIR });
+  green("Swift build complete");
+
+  step("Assembling Meetey.app");
+  const version = JSON.parse(readFileSync(join(PKG_DIR, "package.json"), "utf8")).version;
+  rmSync(APP_BUNDLE, { recursive: true, force: true });
+  mkdirSync(dirname(BINARY_PATH), { recursive: true });
+  cpSync(BUILT_BINARY, BINARY_PATH);
+  const plist = readFileSync(join(CAPTURE_DIR, "Info.plist"), "utf8").replaceAll("__VERSION__", version);
+  writeFileSync(join(APP_BUNDLE, "Contents", "Info.plist"), plist);
+  green(`Assembled: ${APP_BUNDLE}`);
+
+  step("Code-signing Meetey.app");
+  execFileSync("codesign", [
+    "--force", "--sign", "-",
+    "--options", "runtime",
+    "--entitlements", join(CAPTURE_DIR, "entitlements.plist"),
+    APP_BUNDLE,
+  ]);
+  green(`Signed: ${APP_BUNDLE}`);
 }
 
 export function registerMcpServer() {

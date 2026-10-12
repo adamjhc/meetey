@@ -28,7 +28,7 @@ This builds the Swift binary, downloads the Whisper model, copies the MCP server
 | `.build/release/meetey-capture --selftest` | Keyframe pipeline + auto-stop, no permission needed |
 | `node daemon/watch.js --selftest` | Meeting-detection patterns |
 | `node mcp-server/index.js` | Run the MCP server manually for debugging |
-| `codesign --force --sign - --options runtime --entitlements entitlements.plist .build/release/meetey-capture` | Re-sign after a Swift rebuild (run inside `meetey-capture/`) |
+| `node cli/index.js update` | From a clone: rebuild, re-assemble and re-sign `~/.meetey/Meetey.app` |
 
 ## Architecture
 
@@ -224,9 +224,22 @@ moment in time — a prompt, a command, a confirmation. This is the only one tha
 stays true for the whole meeting, so don't make it opt-in and don't hide it behind
 a preference.
 
-A status item does **not** need an app bundle: `.accessory` activation policy plus
-AppKit's run loop is enough, which is why `main.swift` calls `NSApplication.run()`
-instead of `RunLoop.main.run()` when `--menu-bar` is set. (Notification *action
+A status item does **not** need an app bundle to *appear*: `.accessory` activation
+policy plus AppKit's run loop is enough, which is why `main.swift` calls
+`NSApplication.run()` instead of `RunLoop.main.run()` when `--menu-bar` is set.
+
+It does need one to *stay* visible. A bare executable's item has no app identity,
+and macOS — and menu bar managers built on it, such as Thaw and Ice — will not
+keep it shown or remember its place: it vanished whenever other icons were
+hidden, which defeats an indicator whose job is to be seen. So since 2.1.2 the
+binary runs from **`~/.meetey/Meetey.app`** (`com.meetey.capture`, `LSUIElement`,
+template in `meetey-capture/Info.plist`), assembled and signed by
+`buildCaptureApp()` in `cli/commands/install.js`. `BINARY_PATH` is the copy
+inside the bundle; `BUILT_BINARY` is the build output and is never run. Both
+indicators set an `autosaveName` (`com.meetey.capture.recording` /
+`.watching`) so they are told apart, and assert `isVisible = true` at start
+because named items persist visibility — the watcher's hides itself during a
+recording and must not come back hidden. (Notification *action
 buttons* are the thing that genuinely requires bundling — see the watch agent,
 which uses `display dialog` for that reason. Plain `display notification` needs no
 bundle either, which is how the post-stop notice is posted.)

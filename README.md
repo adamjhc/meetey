@@ -437,14 +437,13 @@ cd meetey
 node cli/index.js install     # build, sign, and register everything locally
 ```
 
-After changing Swift sources, rebuild and re-sign:
+After changing Swift sources, rebuild, re-assemble and re-sign `~/.meetey/Meetey.app`:
 
 ```bash
-cd meetey-capture
-swift build -c release
-codesign --force --sign - --options runtime --entitlements entitlements.plist \
-  .build/release/meetey-capture
+node cli/index.js update
 ```
+
+The capture binary runs from inside `Meetey.app` so its menu bar icons have an app identity — without one, macOS and menu bar managers like Thaw won't keep them visible.
 
 Then restart Claude Code so the MCP server reconnects.
 

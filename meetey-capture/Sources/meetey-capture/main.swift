@@ -830,6 +830,13 @@ final class RecordingIndicator: NSObject {
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
+        // A stable name lets macOS and menu bar managers tell this item apart
+        // from the watcher's — both belong to com.meetey.capture — and remember
+        // where the user put it. Named items also persist their visibility, so
+        // it is asserted rather than inherited from a previous run.
+        item.autosaveName = "com.meetey.capture.recording"
+        item.isVisible = true
+
         item.button?.imagePosition = .imageLeading
 
         let menu = NSMenu()
@@ -1021,6 +1028,12 @@ final class WatcherIndicator: NSObject {
         self.plistPath = plistPath
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
+
+        // See RecordingIndicator. Asserting visibility matters more here: this
+        // item hides itself while a recording runs, and a named item would
+        // otherwise come back hidden if the process ended mid-recording.
+        item.autosaveName = "com.meetey.capture.watching"
+        item.isVisible = true
 
         item.button?.image = NSImage(systemSymbolName: "circle.dotted",
                                      accessibilityDescription: "Meetey is watching for meetings")

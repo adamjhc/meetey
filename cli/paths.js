@@ -28,7 +28,12 @@ export const SERVER_DIR     = join(MEETEY_DIR, "mcp-server");
 export const DAEMON_DIR     = join(MEETEY_DIR, "daemon");
 export const CAPTURE_DIR    = join(MEETEY_DIR, "meetey-capture");
 export const LOGS_DIR       = join(MEETEY_DIR, "logs");
-export const BINARY_PATH    = join(CAPTURE_DIR, ".build", "release", "meetey-capture");
+/** What `swift build` produces. Never run directly — it is copied into the app. */
+export const BUILT_BINARY   = join(CAPTURE_DIR, ".build", "release", "meetey-capture");
+/** The binary lives inside an app bundle so its menu bar items have an app
+ *  identity; without one, macOS and menu bar managers will not keep them shown. */
+export const APP_BUNDLE     = join(MEETEY_DIR, "Meetey.app");
+export const BINARY_PATH    = join(APP_BUNDLE, "Contents", "MacOS", "meetey-capture");
 export const MODEL_PATH     = join(MODELS_DIR, "ggml-base.en.bin");
 export const SKILL_PATH     = join(HOME, ".claude", "skills", "meetey", "SKILL.md");
 export const CLAUDE_JSON    = join(HOME, ".claude.json");

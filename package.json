@@ -30,6 +30,7 @@
     "meetey-capture/Sources",
     "meetey-capture/Package.swift",
     "meetey-capture/entitlements.plist",
+    "meetey-capture/Info.plist",
     "skill/SKILL.md",
     "LICENSE",
     "NOTICE"

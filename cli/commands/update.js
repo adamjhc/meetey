@@ -14,34 +14,22 @@
  * limitations under the License.
  */
 
-import { execFileSync } from "child_process";
 import { existsSync, cpSync } from "fs";
 import { join } from "path";
 import { green, yellow, red, step, run } from "../utils.js";
-import { PKG_DIR, CAPTURE_DIR, BINARY_PATH, SERVER_DIR, DAEMON_DIR, SKILL_PATH, MEETEY_DIR, HOME } from "../paths.js";
-import { registerMcpServer, installSkill, registerKeybindings } from "./install.js";
+import { PKG_DIR, BINARY_PATH, BUILT_BINARY, SERVER_DIR, DAEMON_DIR, SKILL_PATH, MEETEY_DIR, HOME } from "../paths.js";
+import { buildCaptureApp, registerMcpServer, installSkill, registerKeybindings } from "./install.js";
 
 export async function update() {
   // --- Verify installed ---
-  if (!existsSync(BINARY_PATH)) {
+  // Before 2.1.2 the binary ran from the build directory, not Meetey.app.
+  if (!existsSync(BINARY_PATH) && !existsSync(BUILT_BINARY)) {
     red("meetey-capture binary not found. Run: npx adamjhc/meetey install");
     process.exit(1);
   }
 
-  // --- Rebuild Swift binary ---
-  step("Rebuilding meetey-capture");
-  cpSync(join(PKG_DIR, "meetey-capture"), CAPTURE_DIR, { recursive: true, force: true });
-  run("swift build -c release", { cwd: CAPTURE_DIR });
-  green("Swift build complete");
-
-  step("Code-signing meetey-capture");
-  execFileSync("codesign", [
-    "--force", "--sign", "-",
-    "--options", "runtime",
-    "--entitlements", join(CAPTURE_DIR, "entitlements.plist"),
-    BINARY_PATH,
-  ]);
-  green(`Signed: ${BINARY_PATH}`);
+  // --- Rebuild Swift binary and Meetey.app ---
+  buildCaptureApp();
 
   // --- Update MCP server ---
   step("Updating MCP server");
