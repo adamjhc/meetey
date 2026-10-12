@@ -61,7 +61,9 @@ Meetey — local meeting capture
    **Screen capture is not narrowed to a window.** It covers everything the app displays. Scoping to a window was tried and repeatedly cost recordings: replacing a captured window — which Google Meet does when you join a call — kills the whole capture, audio included. Never offer window selection as a privacy control.
 
 7. Call `start_recording` with the chosen `bundleID`, `captureVideo: true` only if the user explicitly opted in, and `windowID`/`displayID` when the user chose them. Pass `label` too — the window title if one was listed, otherwise the app name — so the menu bar indicator names what it is recording rather than saying "Meeting".
-8. Confirm to the user: "Recording started[, capturing screen content from <window title>]. Stop it from the menu bar, with `/meetey stop`, or with `Ctrl+Shift+S`."
+8. Confirm to the user: "Recording started[, capturing screen content from <window title>]. Stop it from the menu bar, with `/meetey stop`, or with `Ctrl+Shift+S`." When the result has `capturingMic: true`, add: "Your microphone is recorded too, so your side is in the transcript — **including while you're muted in the meeting app**. Pause it from the Meetey menu bar icon." The first mic recording makes macOS ask whether Meetey may use the microphone; say so the first time.
+
+**Your microphone.** `start_recording` records it by default (`captureMic`), because the meeting app's audio never contains the user's own voice — without it their half of the meeting is missing. Pass `captureMic: false` if they don't want it.
 
 The recording also ends itself if the app quits, or if the chosen window closes — so forgetting to stop costs a little disk, not a runaway recording. Don't advertise this as "it knows when your meeting ends": it does not detect a call ending while the app keeps running, and saying otherwise would leave someone expecting a stop that never comes.
 
@@ -79,7 +81,9 @@ The recording also ends itself if the app quits, or if the chosen window closes 
 2. **A transcript may already exist.** The watcher writes `<sessionId>-transcript.md` as soon as a recording ends, so check for it before doing the work again. When you write the notes, **rename that file** to `<notes-stem>-transcript.md` rather than writing a new one — two transcripts for one meeting is worse than either.
 3. Call `transcribe` with the returned `outputPath`. It reuses the cached whisper output when it is current, so this is usually instant. It returns:
    - `transcript` — the full text
-   - `segments` — `{ text, fromMs, toMs }` per utterance
+   - `segments` — `{ text, fromMs, toMs }` per utterance, plus `speaker` (`"Me"` or `"Them"`) when the microphone was recorded
+   - `speakers` — `["Me", "Them"]` when segments are labelled, otherwise null. **Me** is the user; **Them** is everyone else on the call, not one person
+   - `micNote` / `micError` — present when the user's side is missing or failed to transcribe; say so once, since it explains a one-sided transcript
    - `durationMs` / `durationLabel` — exact length, read from the WAV header
    - `model` — the Whisper model that produced this
    - `quality` — `{ level, reason, spokenWordsPerMinute, degradedRatio, silenceRatio }`, where `level` is `good`, `fair`, `poor`, or `unusable`
@@ -92,6 +96,7 @@ The recording also ends itself if the app quits, or if the chosen window closes 
 - **Use `ocrText` as the primary signal for screen content.** It is already extracted and costs nothing extra.
 - **Read a keyframe image directly** (with the Read tool, using its `path`) only when OCR is insufficient — a diagram, chart, architecture sketch, whiteboard, or UI screenshot where layout carries the meaning, or when `ocrText` is missing or obviously garbled. Read at most a handful; do not read every frame.
 - **Anchor every claim to a timestamp.** Each decision, action item, and screen-content note carries the offset where it happened, formatted `[mm:ss]` (or `[h:mm:ss]` past the hour). Derive it from the `fromMs` of the segment the claim came from, or a frame's `offsetMs`. This is what makes the notes checkable — a reader who doubts a line can jump straight to it in the transcript instead of searching thousands of words.
+- **Use `speaker` when it is there.** "Me" is the user, so an action item they took on is theirs — write "I'll check the logs" as an action for the user, not for "someone". "Them" is everyone else combined; attribute to a named person only when the transcript itself names them.
 - **Let `quality` set your confidence.** At `fair` or below, prefer quoting what was actually said over paraphrasing, and don't manufacture decisions from ambiguous fragments.
 
 ### Output

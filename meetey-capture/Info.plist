@@ -25,5 +25,7 @@
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Meetey records your side of meetings you choose to record, so your own voice is in the transcript. Pause it any time from the Meetey menu bar icon.</string>
 </dict>
 </plist>

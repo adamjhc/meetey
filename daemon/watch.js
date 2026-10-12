@@ -41,7 +41,7 @@ import { basename, dirname, join, resolve } from "path";
 import { readActive, writeActive, clearActive, writePending, activeStatePath } from "../mcp-server/session-state.js";
 import { writeHealth, watchPaths } from "../mcp-server/watch-agent.js";
 import { resolveWhisper } from "../mcp-server/whisper.js";
-import { writeSessionTranscript } from "../mcp-server/transcript.js";
+import { micPathFor, writeSessionTranscript } from "../mcp-server/transcript.js";
 
 const HOME = homedir();
 const MEETEY_DIR = process.env.MEETEY_HOME ?? join(HOME, ".meetey");
@@ -214,9 +214,13 @@ export function parseDialogChoice(output) {
 function askToRecord(window) {
   const app = APP_NAMES[window.bundleID] ?? "a meeting app";
   const title = (window.title ?? "").slice(0, 90);
+  const mic = MIC_ENABLED
+    ? `Your microphone is recorded too, even while you're muted in ${app} — ` +
+      `pause it from the Meetey menu bar icon. `
+    : "";
   const message =
     `Meetey noticed a meeting in ${app}:\n\n${title}\n\n` +
-    `Record it? "${AUDIO_AND_SCREEN}" captures only this window. It stops on ` +
+    `Record it? "${AUDIO_AND_SCREEN}" captures only this window. ${mic}It stops on ` +
     `its own when the call ends; run /meetey stop in Claude Code to write up ` +
     `the notes.`;
 
@@ -244,6 +248,9 @@ function askToRecord(window) {
   }
 }
 
+/** Mic recording follows the same default as /meetey start. */
+const MIC_ENABLED = process.env.MEETEY_NO_MIC !== "1";
+
 function transcribeInBackground(wavPath) {
   if (!existsSync(MODEL_PATH)) {
     log("whisper model missing — leaving the WAV untranscribed");
@@ -257,44 +264,62 @@ function transcribeInBackground(wavPath) {
     log("whisper-cli not found — leaving the WAV for /meetey stop to transcribe");
     return;
   }
-  log(`transcribing ${wavPath}`);
+  // The call first, then your mic if it was recorded; the transcript is written
+  // once both are done so it comes out merged as Me / Them. A mic that fails to
+  // transcribe still leaves the call's transcript.
+  const micPath = micPathFor(wavPath);
+  const files = existsSync(micPath) ? [wavPath, micPath] : [wavPath];
 
-  // spawn, not execFileSync. Whisper on an hour of audio runs for minutes, and a
-  // synchronous call blocks Node's event loop for all of it — the poll never
-  // fires, so a meeting starting right after one ends is missed entirely. Two
-  // calls back to back is the ordinary case, not an edge case.
-  const child = spawn(whisper, [
-    "-f", wavPath,
-    "-m", MODEL_PATH,
-    "-l", "en",
-    "--output-json",
-    "--no-prints",
-  ], { stdio: ["ignore", "ignore", "pipe"] });
-
-  child.on("exit", (code) => {
-    if (code !== 0) {
-      log(`transcription failed (exit ${code})`);
+  const next = (index) => {
+    if (index === files.length) {
+      // Turn it into something readable straight away. Notes need Claude; a
+      // transcript does not, and leaving the meeting as a JSON blob until someone
+      // opens an editor is how a recording ends up never being read at all.
+      const result = writeSessionTranscript({
+        recordingsDir: RECORDINGS_DIR,
+        sessionId: basename(wavPath, ".wav"),
+        jsonPath: `${wavPath}.json`,
+      });
+      log(result.written
+        ? `transcript ready: ${result.path} (${result.segments} segments)`
+        : `transcription ready but no transcript written: ${result.reason}`);
       return;
     }
-    // Turn it into something readable straight away. Notes need Claude; a
-    // transcript does not, and leaving the meeting as a JSON blob until someone
-    // opens an editor is how a recording ends up never being read at all.
-    const result = writeSessionTranscript({
-      recordingsDir: RECORDINGS_DIR,
-      sessionId: basename(wavPath, ".wav"),
-      jsonPath: `${wavPath}.json`,
+    const file = files[index];
+    log(`transcribing ${file}`);
+
+    // spawn, not execFileSync. Whisper on an hour of audio runs for minutes, and a
+    // synchronous call blocks Node's event loop for all of it — the poll never
+    // fires, so a meeting starting right after one ends is missed entirely. Two
+    // calls back to back is the ordinary case, not an edge case.
+    const child = spawn(whisper, [
+      "-f", file,
+      "-m", MODEL_PATH,
+      "-l", "en",
+      "--output-json",
+      "--no-prints",
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+
+    child.on("exit", (code) => {
+      if (code !== 0) {
+        log(`transcription failed for ${file} (exit ${code})`);
+        if (index === 0) return;
+      }
+      next(index + 1);
     });
-    log(result.written
-      ? `transcript ready: ${result.path} (${result.segments} segments)`
-      : `transcription ready but no transcript written: ${result.reason}`);
-  });
-  child.on("error", (e) => log(`transcription failed: ${e.message.split("\n")[0]}`));
+    child.on("error", (e) => {
+      log(`transcription failed for ${file}: ${e.message.split("\n")[0]}`);
+      if (index > 0) next(index + 1);
+    });
+  };
+  next(0);
 }
 
 function startRecording(window, mode) {
   const sessionId = `meetey-${Date.now()}`;
   const outputPath = join(RECORDINGS_DIR, `${sessionId}.wav`);
   const framesDir = mode === "screen" ? join(RECORDINGS_DIR, `${sessionId}-frames`) : null;
+  const micPath = MIC_ENABLED ? micPathFor(outputPath) : null;
   mkdirSync(RECORDINGS_DIR, { recursive: true });
 
   // Screen capture is still consented to per recording — the agent offers, the
@@ -318,12 +343,14 @@ function startRecording(window, mode) {
   if (framesDir) {
     args.push("--video", "--frames-dir", framesDir, "--window", String(window.windowID));
   }
+  if (micPath) args.push("--mic", micPath);
 
   const child = spawn(CAPTURE_BINARY, args, { stdio: ["ignore", "ignore", "pipe"] });
   activeCapture = child;
 
   let autoStopReason = null;
   let confirmedStart = false;
+  let micDenied = false;
   child.stderr.on("data", (d) => {
     const text = d.toString();
     process.stderr.write(text);
@@ -331,6 +358,10 @@ function startRecording(window, mode) {
     const reason = text.match(/auto-stop — (.+)/);
     if (reason) autoStopReason = reason[1].trim();
     if (/call ended — trimming/.test(text)) autoStopReason = "the call ended";
+    if (/microphone access denied/.test(text)) {
+      micDenied = true;
+      log("microphone access denied — recording call audio only. Allow Meetey in System Settings → Privacy & Security → Microphone.");
+    }
   });
 
   // A spawn failure emits `error`, never `exit`. Without a listener that is an
@@ -359,12 +390,13 @@ function startRecording(window, mode) {
     // Must be the real path, not null: stop_recording reads this to find the
     // keyframe manifest, so a wrong value here loses the screen content.
     framesDir,
+    micPath,
     startedAt,
     startedBy: "watch",
     windowTitle: window.title ?? "",
     bundleID: window.bundleID,
   });
-  log(`recording ${sessionId} (${mode === "screen" ? "audio + screen" : "audio"}) — ${window.title}`);
+  log(`recording ${sessionId} (${mode === "screen" ? "audio + screen" : "audio"}${micPath ? " + mic" : ""}) — ${window.title}`);
 
   child.on("exit", (code, signal) => {
     activeCapture = null;
@@ -388,6 +420,8 @@ function startRecording(window, mode) {
       sessionId,
       outputPath,
       framesDir,
+      micPath,
+      micDenied,
       startedAt,
       stoppedAt: new Date().toISOString(),
       startedBy: "watch",

@@ -19,6 +19,8 @@ import { execFileSync } from "child_process";
 import { join } from "path";
 
 const WAV_RE = /^(meetey-\d+)\.wav$/;
+/** Your side of the call, recorded beside it. Part of the same session, never its own. */
+const MIC_WAV_RE = /^(meetey-\d+)-mic\.wav$/;
 const FRAMES_RE = /^(meetey-\d+)-frames$/;
 
 /** Minimal YAML front matter reader — flat `key: value` only, no dependency. */
@@ -99,7 +101,7 @@ export function scanLibrary(recordingsDir) {
         hasVideo: false,
         keyframeCount: null,
         truncated: null,
-        files: { audio: null, notes: null, transcript: null, frames: null },
+        files: { audio: null, mic: null, notes: null, transcript: null, frames: null },
       });
     }
     return sessions.get(id);
@@ -113,6 +115,12 @@ export function scanLibrary(recordingsDir) {
     const wav = entry.isFile() && entry.name.match(WAV_RE);
     if (wav) {
       touch(wav[1]).files.audio = fileEntry(full);
+      continue;
+    }
+
+    const mic = entry.isFile() && entry.name.match(MIC_WAV_RE);
+    if (mic) {
+      touch(mic[1]).files.mic = fileEntry(full);
       continue;
     }
 

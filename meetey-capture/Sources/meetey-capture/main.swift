@@ -52,6 +52,14 @@ struct Args {
     let watchIndicator: Bool
     let stateFile: String
     let plistPath: String
+    /// Also record the default microphone to this path (see MicCapture.swift).
+    let micPath: String?
+    /// Internal: run as the microphone helper.
+    let recordMic: Bool
+    let epochMs: Double?
+    /// Internal: write "<pid> <responsible pid>" to this path and exit.
+    let responsibleCheck: String?
+    let verifyMic: Bool
 
     static func parse() -> Args {
         var bundleID = ""
@@ -81,6 +89,11 @@ struct Args {
         var watchIndicator = false
         var stateFile = ""
         var plistPath = ""
+        var micPath: String? = nil
+        var recordMic = false
+        var epochMs: Double? = nil
+        var responsibleCheck: String? = nil
+        var verifyMic = false
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -112,6 +125,11 @@ struct Args {
             case "--watch-indicator": watchIndicator = true
             case "--state-file":      stateFile = it.next() ?? ""
             case "--plist":           plistPath = it.next() ?? ""
+            case "--mic":             micPath = it.next()
+            case "--record-mic":      recordMic = true
+            case "--epoch-ms":        epochMs = Double(it.next() ?? "")
+            case "--responsible-check": responsibleCheck = it.next()
+            case "--verify-mic":      verifyMic = true
             default: break
             }
         }
@@ -124,7 +142,9 @@ struct Args {
                     volatilityMask: volatilityMask, autoStop: autoStop,
                     autoStopGrace: autoStopGrace, stopWhenCallEnds: stopWhenCallEnds,
                     callEndGrace: callEndGrace, menuBar: menuBar, label: label,
-                    watchIndicator: watchIndicator, stateFile: stateFile, plistPath: plistPath)
+                    watchIndicator: watchIndicator, stateFile: stateFile, plistPath: plistPath,
+                    micPath: micPath, recordMic: recordMic, epochMs: epochMs,
+                    responsibleCheck: responsibleCheck, verifyMic: verifyMic)
     }
 }
 
@@ -808,18 +828,23 @@ final class RecordingIndicator: NSObject {
     private let capturingVideo: Bool
     private let onStop: () -> Void
     private let onKeepRecording: () -> Void
+    /// Nil when the mic is not being recorded, which hides the item.
+    private let onMicPaused: ((Bool) -> Void)?
+    private var micPaused = false
     private var timer: Timer?
     private var state: State = .recording
 
     private let titleItem = NSMenuItem()
     private let statusItem = NSMenuItem()
     private let keepItem = NSMenuItem()
+    private let micItem = NSMenuItem()
     private let stopItem = NSMenuItem()
 
     /// Returns nil when there is no GUI session to draw into — an ssh shell, say.
     /// A missing indicator must never take the recording down with it.
     init?(label: String, startedAt: Date, capturingVideo: Bool,
-          onStop: @escaping () -> Void, onKeepRecording: @escaping () -> Void) {
+          onStop: @escaping () -> Void, onKeepRecording: @escaping () -> Void,
+          onMicPaused: ((Bool) -> Void)? = nil) {
         guard !NSScreen.screens.isEmpty else { return nil }
 
         self.startedAt = startedAt
@@ -827,6 +852,7 @@ final class RecordingIndicator: NSObject {
         self.capturingVideo = capturingVideo
         self.onStop = onStop
         self.onKeepRecording = onKeepRecording
+        self.onMicPaused = onMicPaused
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -857,6 +883,14 @@ final class RecordingIndicator: NSObject {
         keepItem.isHidden = true
         menu.addItem(keepItem)
 
+        // Being muted in the meeting app does not mute this: the mic is recorded
+        // directly, so a side conversation while "muted" would still be captured.
+        // This is the control for that, one click from the indicator.
+        micItem.action = #selector(micClicked)
+        micItem.target = self
+        micItem.isHidden = onMicPaused == nil
+        menu.addItem(micItem)
+
         stopItem.title = "Stop Recording"
         stopItem.action = #selector(stopClicked)
         stopItem.target = self
@@ -882,7 +916,14 @@ final class RecordingIndicator: NSObject {
 
     private func render() {
         let elapsed = Int(Date().timeIntervalSince(startedAt))
-        let mode = capturingVideo ? "Audio + screen" : "Audio only"
+        let mode: String
+        switch (capturingVideo, onMicPaused != nil) {
+        case (true, true):   mode = micPaused ? "Audio + screen, mic paused" : "Audio, mic + screen"
+        case (false, true):  mode = micPaused ? "Audio, mic paused" : "Audio + mic"
+        case (true, false):  mode = "Audio + screen"
+        case (false, false): mode = "Audio only"
+        }
+        micItem.title = micPaused ? "Resume My Microphone" : "Pause My Microphone"
 
         switch state {
         case .recording:
@@ -892,7 +933,9 @@ final class RecordingIndicator: NSObject {
             item.button?.image = Self.symbol(capturingVideo ? "rectangle.inset.filled.badge.record"
                                                             : "record.circle.fill",
                                              color: .systemRed)
-            item.button?.title = " \(Self.clock(elapsed))"
+            // Paused is shown on the bar itself, not only in the menu: forgetting
+            // to resume would silently drop your side of the rest of the call.
+            item.button?.title = " \(Self.clock(elapsed))\(micPaused ? " · mic off" : "")"
             statusItem.title = "\(mode) · \(Self.clock(elapsed))"
             keepItem.isHidden = true
             stopItem.isEnabled = true
@@ -962,6 +1005,12 @@ final class RecordingIndicator: NSObject {
     @objc private func keepClicked() {
         setState(.recording)
         onKeepRecording()
+    }
+
+    @objc private func micClicked() {
+        micPaused.toggle()
+        onMicPaused?(micPaused)
+        render()
     }
 
     func remove() {
@@ -1186,6 +1235,47 @@ enum Microphone {
         guard AudioObjectGetPropertyData(device, &runningAddress, 0, nil,
                                          &runningSize, &running) == noErr else { return nil }
         return running != 0
+    }
+
+    /// Whether any process *other than* `excluded` is taking audio input.
+    ///
+    /// Needed once Meetey records the mic itself: the device is then always
+    /// running, so `inUse()` would never see the call end. Asking each process
+    /// instead, and ignoring our own, keeps the original meaning — the meeting
+    /// app still holds the mic. Process objects need macOS 14.
+    @available(macOS 14.0, *)
+    static func inUse(excluding excluded: Set<pid_t>) -> Bool? {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var listAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(system, &listAddress, 0, nil, &size) == noErr else { return nil }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &listAddress, 0, nil, &size, &objects) == noErr else { return nil }
+
+        for object in objects {
+            var pid = pid_t(0)
+            var pidSize = UInt32(MemoryLayout<pid_t>.size)
+            var pidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyPID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(object, &pidAddress, 0, nil, &pidSize, &pid) == noErr,
+                  !excluded.contains(pid) else { continue }
+
+            var running = UInt32(0)
+            var runningSize = UInt32(MemoryLayout<UInt32>.size)
+            var runningAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyIsRunningInput,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(object, &runningAddress, 0, nil,
+                                             &runningSize, &running) == noErr else { continue }
+            if running != 0 { return true }
+        }
+        return false
     }
 }
 
@@ -1792,8 +1882,59 @@ func selfTest() throws {
     }
     print("  live: header stays current while recording (\(midData)/\(expected) bytes visible mid-write)")
 
+    // The mic helper has to be responsible for itself, or macOS asks whatever
+    // launched Meetey for the microphone — and some launchers can never say yes.
+    let checkPath = NSTemporaryDirectory() + "meetey-responsible-\(getpid())"
+    if let helper = Responsibility.spawnDisclaimed(["--responsible-check", checkPath]) {
+        var status: Int32 = 0
+        waitpid(helper, &status, 0)
+        let fields = ((try? String(contentsOfFile: checkPath, encoding: .utf8)) ?? "").split(separator: " ")
+        try? FileManager.default.removeItem(atPath: checkPath)
+        if fields.count == 2, fields[1] == "unknown" {
+            print("  mic: responsibility not readable here — disclaim not verified")
+        } else if fields.count == 2, fields[0] == fields[1] {
+            print("  mic: helper is responsible for itself")
+        } else {
+            failures.append("mic: helper is not responsible for itself (\(fields.joined(separator: " ")))")
+        }
+    } else {
+        failures.append("mic: could not spawn the helper")
+    }
+
+    // Timeline: jitter is ignored, real gaps are closed exactly.
+    if MicTimeline.paddingBefore(elapsed: 1.0, written: 15_000, incoming: 800) != 0 {
+        failures.append("mic: padded over buffer jitter")
+    }
+    if MicTimeline.paddingBefore(elapsed: 5.0, written: 0, incoming: 1_600) != 78_400 {
+        failures.append("mic: late start not padded to the call's clock")
+    }
+
+    // A mic file longer than the trimmed call recording is cut to match.
+    let micTest = NSTemporaryDirectory() + "meetey-mic-trim-\(getpid()).wav"
+    let micWriter = try WAVWriter(path: micTest)
+    micWriter.append(samples: [Int16](repeating: 1000, count: 32_000))
+    micWriter.finalize()
+    truncateWAV(atPath: micTest, toDataBytes: 20_001)
+    let trimmedSize = (try? FileManager.default.attributesOfItem(atPath: micTest)[.size] as? Int) ?? 0
+    try? FileManager.default.removeItem(atPath: micTest)
+    if trimmedSize != Int(WAVWriter.headerBytes) + 20_000 {
+        failures.append("mic: trim left \(trimmedSize) bytes, expected \(Int(WAVWriter.headerBytes) + 20_000)")
+    }
+    print("  mic: timeline padding and trim-to-call OK")
+
+    // Call-end detection depends on reading other processes' input state once
+    // the mic is recorded. Informational: a machine with no audio devices (CI)
+    // has nothing to report, which is not a failure of this code.
+    if #available(macOS 14.0, *) {
+        if let inUse = Microphone.inUse(excluding: [getpid()]) {
+            print("  mic: per-process input state readable (another app using the mic: \(inUse))")
+        } else {
+            print("  mic: WARNING — per-process input state unreadable; call-end detection will not fire while the mic is recorded")
+        }
+    }
+
     if failures.isEmpty {
-        print("selftest: PASS (settling, volatility mask, cadence, revisit dedup, unsettled valve, auto-stop, call-end trim, OCR + manifest OK)")
+        print("selftest: PASS (settling, volatility mask, cadence, revisit dedup, unsettled valve, auto-stop, call-end trim, OCR + manifest, mic helper OK)")
         exit(0)
     }
     for failure in failures { fputs("selftest: FAIL — \(failure)\n", stderr) }
@@ -2176,6 +2317,28 @@ func record(args: Args) async throws {
     try await stream.startCapture()
     fputs("meetey-capture: recording started\n", stderr)
 
+    // Your own voice never reaches the app's audio output, so the call recording
+    // never contains it. A helper records the mic to a sibling file on the same
+    // clock; see MicCapture.swift for why it is a separate, disclaimed process.
+    let micPid: pid_t? = {
+        guard let micPath = args.micPath else { return nil }
+        guard #available(macOS 14.0, *) else {
+            // Without per-process mic state, recording the mic would blind
+            // call-end detection, so the call is recorded without it.
+            fputs("meetey-capture: recording the microphone needs macOS 14 — call audio only\n", stderr)
+            return nil
+        }
+        let epochMs = String(Int(Date().timeIntervalSince1970 * 1000))
+        guard let pid = Responsibility.spawnDisclaimed(["--record-mic", "--output", micPath,
+                                                        "--epoch-ms", epochMs]) else {
+            fputs("meetey-capture: could not start microphone recording — call audio only\n", stderr)
+            return nil
+        }
+        fputs("meetey-capture: recording your microphone to \(micPath)\n", stderr)
+        return pid
+    }()
+    let ownPids: Set<pid_t> = micPid.map { [getpid(), $0] } ?? [getpid()]
+
     // Use AsyncStream to bridge DispatchSource signal handlers into async context
     let (stopStream, stopContinuation) = AsyncStream<Void>.makeStream()
 
@@ -2226,10 +2389,17 @@ func record(args: Args) async throws {
         guard args.menuBar else { return nil }
         let menuLabel = args.label
         let capturingVideo = args.video
+        let onMicPaused: ((Bool) -> Void)? = micPid.map { pid in
+            { paused in
+                kill(pid, paused ? SIGUSR1 : SIGUSR2)
+                fputs("meetey-capture: microphone \(paused ? "paused" : "resumed")\n", stderr)
+            }
+        }
         let made = await MainActor.run {
             RecordingIndicator(label: menuLabel, startedAt: startedAt,
                                capturingVideo: capturingVideo,
-                               onStop: fireOnce, onKeepRecording: keepRecording)
+                               onStop: fireOnce, onKeepRecording: keepRecording,
+                               onMicPaused: onMicPaused)
         }
         if made == nil {
             fputs("meetey-capture: no GUI session — recording without a menu bar indicator\n", stderr)
@@ -2251,7 +2421,13 @@ func record(args: Args) async throws {
 
                 // Unable to read the device is not the same as the mic being
                 // free. Treating it as free would end a live meeting.
-                guard let inUse = Microphone.inUse() else { continue }
+                let reading: Bool?
+                if micPid != nil, #available(macOS 14.0, *) {
+                    reading = Microphone.inUse(excluding: ownPids)
+                } else {
+                    reading = Microphone.inUse()
+                }
+                guard let inUse = reading else { continue }
 
                 // The user saw "ending soon" and said no. Restart the clock —
                 // resetCandidate rather than a fresh monitor, so it stays armed.
@@ -2321,12 +2497,24 @@ func record(args: Args) async throws {
 
     for await _ in stopStream { break }
 
+    // The mic helper finishes its own file; give it a moment to do so.
+    if let micPid {
+        kill(micPid, SIGTERM)
+        var status: Int32 = 0
+        for _ in 0..<50 where waitpid(micPid, &status, WNOHANG) == 0 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
     try? await stream.stopCapture()
     if let indicator {
         await MainActor.run { indicator.remove() }
     }
     let cutTo = trimLock.withLock { trimToBytes }
     let finalBytes = writer.finalize(trimmingToDataBytes: cutTo)
+    if let micPath = args.micPath, micPid != nil {
+        truncateWAV(atPath: micPath, toDataBytes: finalBytes)
+    }
     if cutTo != nil {
         fputs(String(format: "meetey-capture: recording trimmed to %.0fs\n",
                      writer.seconds(forDataBytes: finalBytes)), stderr)
@@ -2369,7 +2557,17 @@ final class IndicatorHost {
 
 Task {
     do {
-        if args.watchIndicator {
+        if args.verifyMic {
+            await verifyMic()
+        } else if args.recordMic {
+            await recordMic(outputPath: args.outputPath,
+                            epoch: args.epochMs.map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date())
+        } else if let path = args.responsibleCheck {
+            let me = getpid()
+            let responsible = Responsibility.responsiblePid(for: me).map(String.init) ?? "unknown"
+            try "\(me) \(responsible)".write(toFile: path, atomically: true, encoding: .utf8)
+            exit(0)
+        } else if args.watchIndicator {
             let ok = await MainActor.run {
                 IndicatorHost.shared.start(stateFile: args.stateFile,
                                            plistPath: args.plistPath.isEmpty ? nil : args.plistPath)

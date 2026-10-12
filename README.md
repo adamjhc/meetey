@@ -158,6 +158,15 @@ That assessment is computed from the transcript itself (fragment rate, whisper l
 
 > **Chrome note:** **audio** is captured at the **process** level — all Chrome audio, not just the meeting tab — so mute any other tabs playing audio before starting. For **screen** capture you can narrow to a single window, which excludes the app's other windows and its notification banners. You cannot narrow to a tab: macOS offers no tab-level capture, so whatever tab that window is showing is what gets captured.
 
+## Your microphone
+
+The meeting app's audio is what it *plays*, and it never plays your own voice back to you, so on its own a recording has everyone but you. Meetey therefore also records your microphone, to `<session>-mic.wav` beside the call audio, and the transcript interleaves the two as **Me** and **Them**.
+
+- **It records while you're muted in the meeting app.** Muting is the app's switch, not the microphone's. Use **Pause My Microphone** in the Meetey menu bar icon instead; the bar shows "mic off" while it's paused.
+- **The first time, macOS asks whether Meetey may use the microphone.** The request names Meetey itself, whichever app started the recording. If you deny it, the call is still recorded and the stop result says your side is missing.
+- **Headphones give the cleanest transcript.** On speakers the mic hears everyone else too; Meetey drops lines that match what the call said at the same moment, but headphones avoid the problem.
+- `captureMic: false` on `start_recording`, or `MEETEY_NO_MIC=1`, records the call audio only. Needs macOS 14 or later.
+
 ## Screen capture
 
 Meetey can also capture what was on screen — slides, screen shares, code, diagrams — and fold it into the notes.
@@ -274,7 +283,7 @@ Search is the one worth knowing about. Asking *"what did we decide about the API
 
 | Stays on your machine, always | Sent to Claude to write the summary |
 |---|---|
-| Meeting audio (the WAV) | The transcript text |
+| Meeting audio (the WAV), and your microphone (`-mic.wav`) | The transcript text |
 | Screen keyframes (the JPEGs) | Recognized on-screen text (OCR) |
 | Whisper transcription — runs locally | A few keyframe **images**, only when text isn't enough |
 | Vision OCR — runs on-device | |

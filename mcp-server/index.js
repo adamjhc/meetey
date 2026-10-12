@@ -23,6 +23,7 @@ import { homedir } from "os";
 import { basename, join, resolve } from "path";
 import { assessQuality, formatDuration, wavDurationMs, repairWavHeader } from "./quality.js";
 import { resolveWhisper } from "./whisper.js";
+import { micPathFor, mergeSpeakers, readWhisperSegments } from "./transcript.js";
 import {
   deleteRecording, getRecording, listRecordings, searchRecordings, systemStatus,
 } from "./library.js";
@@ -42,7 +43,7 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 // Reported as this server's identity to Claude Code, and compared against the
 // latest release. One constant so the two can never disagree — keep it in step
 // with package.json and mcp-server/package.json when bumping.
-const SERVER_VERSION = "2.1.5";
+const SERVER_VERSION = "2.2.0";
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
@@ -239,6 +240,7 @@ function startRecording({
   stopWhenCallEnds = true,
   menuBar = true,
   label,
+  captureMic = process.env.MEETEY_NO_MIC !== "1",
 }) {
   if (activeRecording) {
     return { error: "A recording is already active. Call stop_recording first." };
@@ -262,6 +264,12 @@ function startRecording({
   const outputPath = wavPath(id);
   const args = ["--app", bundleID, "--output", outputPath];
   if (stopAfter) args.push("--stop-after", String(stopAfter));
+
+  // The call audio is what the app plays, and it never plays your own voice, so
+  // without this your side of the meeting is missing. Recorded to a sibling file
+  // and merged at transcription as Me / Them.
+  const micPath = captureMic ? micPathFor(outputPath) : null;
+  if (micPath) args.push("--mic", micPath);
 
   // On by default. It only ends a recording on signals that cannot mean anything
   // else — the app quit, or the explicitly-chosen window closed — and the failure
@@ -307,9 +315,11 @@ function startRecording({
     process: child,
     outputPath,
     framesDir,
+    micPath,
     sessionId: id,
     startedAt: new Date().toISOString(),
     autoStopReason: null,
+    micDenied: false,
   };
 
   child.stderr.on("data", (d) => {
@@ -319,6 +329,7 @@ function startRecording({
     // tell the user why a recording they didn't stop is no longer running.
     const reason = text.match(/auto-stop — (.+)/);
     if (reason) recording.autoStopReason = reason[1].trim();
+    if (/microphone access denied/.test(text)) recording.micDenied = true;
   });
 
   child.on("exit", () => {
@@ -333,6 +344,8 @@ function startRecording({
           sessionId: recording.sessionId,
           outputPath: recording.outputPath,
           framesDir: recording.framesDir,
+          micPath: recording.micPath,
+          micDenied: recording.micDenied,
           startedAt: recording.startedAt,
           stoppedAt,
           startedBy: "mcp",
@@ -348,6 +361,7 @@ function startRecording({
     sessionId: id,
     outputPath,
     framesDir,
+    micPath,
     startedAt: recording.startedAt,
     startedBy: "mcp",
     bundleID,
@@ -358,13 +372,20 @@ function startRecording({
     outputPath,
     bundleID,
     capturingVideo: captureVideo,
+    capturingMic: micPath !== null,
+    micPath,
     framesDir,
     displayID,
     windowID,
     startedAt: activeRecording.startedAt,
-    message: captureVideo
-      ? "Recording started with screen capture. Call stop_recording when the meeting ends."
-      : "Recording started (audio only). Call stop_recording when the meeting ends.",
+    message:
+      (captureVideo
+        ? "Recording started with screen capture. Call stop_recording when the meeting ends."
+        : "Recording started (audio only). Call stop_recording when the meeting ends.") +
+      (micPath
+        ? " Your microphone is recorded too — even while you are muted in the meeting app — " +
+          "and can be paused from the Meetey menu bar icon. The first time, macOS asks to allow Meetey to use the microphone."
+        : ""),
   };
 }
 
@@ -471,7 +492,7 @@ function unwrittenRecordings() {
 }
 
 function buildStopResult(recording, { autoStopped, stoppedAt }) {
-  const { outputPath, framesDir, sessionId: id, startedAt, autoStopReason } = recording;
+  const { outputPath, framesDir, sessionId: id, startedAt, autoStopReason, micPath, micDenied } = recording;
 
   const result = {
     sessionId: id,
@@ -487,6 +508,19 @@ function buildStopResult(recording, { autoStopped, stoppedAt }) {
     result.message = autoStopReason
       ? `Recording already stopped on its own — ${autoStopReason}. Saved to ${outputPath}. Call transcribe with this path.`
       : `Recording already stopped on its own. Saved to ${outputPath}. Call transcribe with this path.`;
+  }
+
+  if (micPath) {
+    if (existsSync(micPath)) {
+      result.micPath = micPath;
+      result.message += " Your microphone was recorded too; transcribe merges it as Me / Them.";
+    } else {
+      result.micMissing = true;
+      result.message += micDenied
+        ? " Your microphone was NOT recorded: macOS denied Meetey microphone access. " +
+          "Allow it in System Settings → Privacy & Security → Microphone."
+        : " Your microphone was not recorded (no mic file was written).";
+    }
   }
 
   if (framesDir) {
@@ -522,43 +556,29 @@ function transcribe({ wavPath: filePath }) {
   const repair = repairWavHeader(filePath);
 
   try {
-    const jsonPath = filePath.replace(/\.wav$/, ".wav.json");
+    const call = whisperSegments(filePath);
+    if (call.error) return { error: call.error };
+    const jsonPath = call.jsonPath;
 
-    // The watch agent transcribes as soon as a recording ends, so by the time
-    // anyone asks the work is usually already done. Re-running whisper on an
-    // hour of audio to produce a byte-identical result is minutes wasted.
-    const cached = existsSync(jsonPath) &&
-      statSync(jsonPath).mtimeMs >= statSync(filePath).mtimeMs;
-
-    if (!cached) {
-      const whisper = resolveWhisper();
-      if (!whisper) {
-        return { error: "whisper-cli not found. Run: brew install whisper-cpp" };
-      }
-      execFileSync(whisper, [
-        "-f", filePath,
-        "-m", MODEL_PATH,
-        "-l", "en",
-        "--output-json",
-        "--no-prints",
-      ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    // Your side of the meeting, when the mic was recorded. A failure here costs
+    // your half of the transcript, never the call's.
+    const micPath = micPathFor(filePath);
+    let mic = null;
+    if (existsSync(micPath)) {
+      repairWavHeader(micPath);
+      mic = whisperSegments(micPath);
     }
-    if (!existsSync(jsonPath)) {
-      return { error: "whisper-cli ran but produced no JSON output." };
-    }
-
-    const raw = JSON.parse(readFileSync(jsonPath, "utf8"));
-    const rawSegments = raw.transcription ?? raw.segments ?? [];
 
     // whisper.cpp reports offsets in milliseconds under `offsets`. Keeping them
     // is what lets the skill interleave keyframes with what was being said.
-    const segments = rawSegments.map((s) => ({
-      text: (s.text ?? s.sentence ?? "").trim(),
-      fromMs: s.offsets?.from ?? null,
-      toMs: s.offsets?.to ?? null,
-    })).filter((s) => s.text.length > 0);
+    const segments = mic?.segments
+      ? mergeSpeakers({ them: call.segments, me: mic.segments, micWavPath: micPath })
+      : call.segments;
 
-    const transcript = segments.map((s) => s.text).join(" ").trim();
+    const transcript = segments
+      .map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text))
+      .join(separatorFor(segments))
+      .trim();
 
     // Duration comes from the WAV header rather than the start/stop wall-clock
     // pair, which includes process spin-up and the SIGTERM drain.
@@ -570,6 +590,9 @@ function transcribe({ wavPath: filePath }) {
         : {}),
       transcript,
       segments,
+      speakers: mic?.segments ? ["Me", "Them"] : null,
+      ...(mic?.error ? { micError: `Your microphone was recorded but could not be transcribed: ${mic.error}` } : {}),
+      ...(existsSync(micPath) ? {} : { micNote: "No microphone recording for this session — only the call audio (other people) is transcribed." }),
       jsonPath,
       model: basename(MODEL_PATH),
       durationMs,
@@ -579,6 +602,43 @@ function transcribe({ wavPath: filePath }) {
   } catch (e) {
     return { error: e.message };
   }
+}
+
+/** Joins labelled segments one per line, unlabelled ones as running text. */
+function separatorFor(segments) {
+  return segments.some((s) => s.speaker) ? "\n" : " ";
+}
+
+/**
+ * Runs whisper on one WAV, reusing `<wav>.json` when it is newer than the audio.
+ *
+ * The watch agent transcribes as soon as a recording ends, so by the time
+ * anyone asks the work is usually already done. Re-running whisper on an hour
+ * of audio to produce a byte-identical result is minutes wasted.
+ */
+function whisperSegments(filePath) {
+  const jsonPath = `${filePath}.json`;
+  const cached = existsSync(jsonPath) &&
+    statSync(jsonPath).mtimeMs >= statSync(filePath).mtimeMs;
+
+  if (!cached) {
+    const whisper = resolveWhisper();
+    if (!whisper) return { error: "whisper-cli not found. Run: brew install whisper-cpp" };
+    try {
+      execFileSync(whisper, [
+        "-f", filePath,
+        "-m", MODEL_PATH,
+        "-l", "en",
+        "--output-json",
+        "--no-prints",
+      ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      return { error: e.message.split("\n")[0] };
+    }
+  }
+  const segments = readWhisperSegments(jsonPath);
+  if (!segments) return { error: "whisper-cli ran but produced no JSON output." };
+  return { segments, jsonPath };
 }
 
 function getKeyframes({ framesDir, sessionId: id }) {
@@ -854,6 +914,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           stopAfter: {
             type: "number",
             description: "Auto-stop after this many seconds of recording (optional).",
+          },
+          captureMic: {
+            type: "boolean",
+            description:
+              "Also record the user's microphone so their own voice is in the transcript, " +
+              "labelled Me / Them (default true; MEETEY_NO_MIC=1 changes the default). The " +
+              "meeting app's audio never contains the user's own voice. It records even while " +
+              "the user is muted in the meeting app; they can pause it from the menu bar icon. " +
+              "Tell the user it is on when starting.",
           },
           captureVideo: {
             type: "boolean",

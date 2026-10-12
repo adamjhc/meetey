@@ -36,15 +36,17 @@ These are load-bearing rules in Meetey and shape the design below:
 - **Nothing queries ScreenCaptureKit while a capture is running.** A second
   connection kills the live stream. The panel never captures the screen
   itself: "this screen" attaches the newest keyframe JPEG already on disk.
-- **One app-scoped `SCStream`.** Mic capture uses `captureMicrophone` on that
-  same stream, not a second stream.
+- **One app-scoped `SCStream`.** The mic is recorded by a separate helper with
+  AVAudioEngine, never through ScreenCaptureKit.
 - **Call-end detection reads "is the mic in use somewhere".** Once we capture
   the mic, Meetey itself keeps the device busy and calls would never be seen
   to end. Switch the check to the *meeting app's* process input
-  (`kAudioProcessPropertyIsRunningInput`, macOS 14+) when `--mic` is on.
-- **Consent is per recording, no remembered choices.** Live mode and mic are
-  offered as options in the watcher dialog each time, never as a setting.
-  Mic capture is a new Microphone TCC prompt; upstream never needed it.
+  (`kAudioProcessPropertyIsRunningInput`, macOS 14+) when `--mic` is on. Done in 2.2.0.
+- **Consent is per recording, no remembered choices.** Live mode is offered as
+  an option in the watcher dialog each time, never as a setting. The mic is
+  part of every recording by default (2.2.0): the dialog says so, the menu bar
+  can pause it, and `MEETEY_NO_MIC=1` turns it off. It is a Microphone TCC
+  prompt for Meetey itself; upstream never needed one.
 - **No global hotkey that starts recording.** The panel's hotkey only
   shows/hides the panel; use Carbon `RegisterEventHotKey`, which needs no
   Accessibility permission.
@@ -82,9 +84,10 @@ Teams ──► meetey-capture --live ──► <session>.wav             (uncha
    finalized results to `transcript.jsonl` as
    `{"startMs","endMs","speaker":"Them","text"}`; overwrite `partial.json` with
    the current volatile result.
-3. Mic: enable `captureMicrophone` (macOS 15+) when `--live --mic`; route the
-   `.microphone` output to a second transcriber, `speaker: "Me"`. Mic audio is
-   **not** mixed into the WAV unless asked — upstream's WAV semantics stay.
+3. Mic: **done in 2.2.0** for ordinary recordings — a disclaimed helper records
+   `<session>-mic.wav` on the call's clock, merged as `Me` / `Them` (see "Your
+   microphone" in CLAUDE.md). Live mode feeds the same helper's buffers to a
+   second transcriber.
 4. Raise the minimum platform to macOS 26 (SpeechAnalyzer). Gate the new code
    with `@available` so the non-live path is unaffected.
 5. `--replay <file.wav>`: drive the live pipeline from a recorded WAV at real

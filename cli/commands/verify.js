@@ -58,6 +58,19 @@ export function verify({ quiet = false } = {}) {
   const captureOk = capture.status === 0;
   if (quiet && !captureOk) process.stdout.write(capture.stdout?.toString() ?? "");
 
+  // Your side of the call. Not required to be "ready" — the call still records
+  // without it — but run here so the permission prompt comes now, not mid-meeting.
+  if (process.env.MEETEY_NO_MIC !== "1") {
+    // stderr is the helper's own progress chatter; the verdict is on stdout.
+    const mic = spawnSync(BINARY_PATH, ["--verify-mic"], {
+      stdio: ["ignore", "inherit", "ignore"],
+      timeout: 120_000,
+    });
+    if (mic.status !== 0) {
+      yellow("  Recordings will have the call audio but not your own voice until this is fixed.");
+    }
+  }
+
   // The transcribe half, which the binary knows nothing about.
   const problems = [];
   const whisper = resolveWhisper();

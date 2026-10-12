@@ -342,6 +342,45 @@ up.
 the grace period, blip recovery with a restarted clock, byte-accurate truncation
 including the odd-byte case, and the audible/silent distinction.
 
+## Your microphone
+
+`--mic <path>` (on by default from `start_recording` and the watcher; `captureMic:
+false` or `MEETEY_NO_MIC=1` turns it off) records the default input device to
+`<session>-mic.wav`. The app's audio never contains the user's own voice, so
+without it their half of every meeting was missing. Code is in
+`MicCapture.swift`.
+
+- **A separate helper process, responsible for itself.** TCC asks the
+  *responsible* process for the microphone — the terminal, the editor hosting
+  Claude Code, or `node` for the watcher — and some of those can never be
+  granted it, failing silently. The helper is spawned with
+  `responsibility_spawnattrs_setdisclaim` (private, looked up with `dlsym`), so
+  the prompt names Meetey and is checked against Meetey.app's
+  `NSMicrophoneUsageDescription` and `com.apple.security.device.audio-input`
+  entitlement. Screen capture stays in the parent with its existing attribution.
+  `--selftest` checks the helper is responsible for itself.
+- **AVAudioEngine, not ScreenCaptureKit.** A second SCK connection from the same
+  app kills the live stream (see above); the mic never touches SCK.
+- **Same clock as the call audio.** The helper pads silence whenever the wall
+  clock is more than half a second ahead of its sample count — its late start, a
+  permission prompt, a headset swap — so sample N in both files is the same
+  moment. On stop the parent truncates the mic file to the call file's length,
+  so a call-end trim applies to both.
+- **Call-end detection excludes Meetey's own processes.** With the mic recorded
+  the input device is always running, so `Microphone.inUse()` would never see the
+  call end. `inUse(excluding:)` asks each Core Audio process object instead
+  (macOS 14+); on macOS 13 the mic is not recorded at all.
+- **Pause, because meeting-app mute does not apply.** The indicator's "Pause My
+  Microphone" sends SIGUSR1/SIGUSR2; the helper writes silence while paused, and
+  the bar reads "mic off".
+- **Merge** (`mergeSpeakers` in `transcript.js`, `--selftest` there): call
+  segments are `Them`, mic segments `Me`. Mic segments over silence are dropped
+  (whisper invents "Thank you." on padding), and so are echoes — a mic segment
+  within two seconds of a call segment sharing most of its words is the call
+  heard through speakers.
+- The library treats `-mic.wav` as part of its session (`files.mic`), so it is
+  deleted with it and never listed as a recording of its own.
+
 ## Auto-stop
 
 `--auto-stop` (passed by default from `start_recording`; set `autoStop: false` to
