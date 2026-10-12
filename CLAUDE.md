@@ -232,11 +232,11 @@ It does need one to *stay* visible. A bare executable's item has no app identity
 and macOS — and menu bar managers built on it, such as Thaw and Ice — will not
 keep it shown or remember its place: it vanished whenever other icons were
 hidden, which defeats an indicator whose job is to be seen. So since 2.1.2 the
-binary runs from **`~/.meetey/Meetey.app`** (`com.meetey.capture`, `LSUIElement`,
+binary runs from **`~/.meetey/Meetey.app`** (`com.adamjhcox.meetey`, `LSUIElement`,
 template in `meetey-capture/Info.plist`), assembled and signed by
 `buildCaptureApp()` in `cli/commands/install.js`. `BINARY_PATH` is the copy
 inside the bundle; `BUILT_BINARY` is the build output and is never run. Both
-indicators set an `autosaveName` (`com.meetey.capture.recording` /
+indicators set an `autosaveName` (`com.adamjhcox.meetey.recording` /
 `.watching`) so they are told apart, and assert `isVisible = true` at start
 because named items persist visibility — the watcher's hides itself during a
 recording and must not come back hidden. (Notification *action
