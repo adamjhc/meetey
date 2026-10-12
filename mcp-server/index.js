@@ -24,6 +24,7 @@ import { basename, join, resolve } from "path";
 import { assessQuality, formatDuration, wavDurationMs, repairWavHeader } from "./quality.js";
 import { resolveWhisper } from "./whisper.js";
 import { micPathFor, mergeSpeakers, readWhisperSegments } from "./transcript.js";
+import { livePathFor } from "./live.js";
 import {
   deleteRecording, getRecording, listRecordings, searchRecordings, systemStatus,
 } from "./library.js";
@@ -43,7 +44,7 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 // Reported as this server's identity to Claude Code, and compared against the
 // latest release. One constant so the two can never disagree — keep it in step
 // with package.json and mcp-server/package.json when bumping.
-const SERVER_VERSION = "2.3.0";
+const SERVER_VERSION = "2.4.0";
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
@@ -273,6 +274,12 @@ function startRecording({
   const micPath = captureMic ? micPathFor(outputPath) : null;
   if (micPath) args.push("--mic", micPath);
 
+  // Live transcript and keyframes, written as the meeting happens, for
+  // `npx adamjhc/meetey live` and the in-call assistant. On-device, local files
+  // only; macOS 26+, and the recording never depends on it.
+  const liveDir = process.env.MEETEY_NO_LIVE === "1" ? null : livePathFor(outputPath);
+  if (liveDir) args.push("--live", liveDir);
+
   // On by default. It only ends a recording on signals that cannot mean anything
   // else — the app quit, or the explicitly-chosen window closed — and the failure
   // it prevents (a recording left running for hours after everyone hung up) is
@@ -364,6 +371,7 @@ function startRecording({
     outputPath,
     framesDir,
     micPath,
+    liveDir,
     startedAt: recording.startedAt,
     startedBy: "mcp",
     bundleID,
@@ -376,6 +384,7 @@ function startRecording({
     capturingVideo: captureVideo,
     capturingMic: micPath !== null,
     micPath,
+    liveDir,
     framesDir,
     displayID,
     windowID,

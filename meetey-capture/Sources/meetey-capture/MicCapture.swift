@@ -111,6 +111,9 @@ final class MicRecorder {
     // Owned by `queue`.
     private var paused = false
     private var written = 0
+    /// Sees every sample written to the file, silence included, so a live
+    /// transcriber stays on the file's clock.
+    var onSamples: (([Int16]) -> Void)?
 
     init(path: String, epoch: Date) throws {
         writer = try WAVWriter(path: path)
@@ -186,6 +189,7 @@ final class MicRecorder {
         } else {
             writer.append(samples: samples)
             written += samples.count
+            onSamples?(samples)
         }
     }
 
@@ -194,7 +198,9 @@ final class MicRecorder {
         let chunk = [Int16](repeating: 0, count: Int(MicTimeline.sampleRate))
         while remaining > 0 {
             let n = min(remaining, chunk.count)
-            writer.append(samples: n == chunk.count ? chunk : Array(chunk.prefix(n)))
+            let silence = n == chunk.count ? chunk : Array(chunk.prefix(n))
+            writer.append(samples: silence)
+            onSamples?(silence)
             remaining -= n
         }
         written += count
@@ -223,7 +229,7 @@ final class MicRecorder {
 /// Started by a recording with `--mic`, never by hand. SIGTERM/SIGINT finish the
 /// file, SIGUSR1 pauses and SIGUSR2 resumes. It also finishes if its parent
 /// disappears, since nothing else would ever stop it.
-func recordMic(outputPath: String, epoch: Date) async -> Never {
+func recordMic(outputPath: String, epoch: Date, liveDir: String? = nil) async -> Never {
     let granted: Bool
     switch AVCaptureDevice.authorizationStatus(for: .audio) {
     case .authorized: granted = true
@@ -237,8 +243,10 @@ func recordMic(outputPath: String, epoch: Date) async -> Never {
     }
 
     let recorder: MicRecorder
+    let live = makeLiveTranscriber(directory: liveDir, speaker: "me")
     do {
         recorder = try MicRecorder(path: outputPath, epoch: epoch)
+        recorder.onSamples = { liveAppend(live, $0) }
         try recorder.start()
     } catch {
         fputs("meetey-capture: microphone recording failed to start (\(error.localizedDescription))\n", stderr)
@@ -247,10 +255,20 @@ func recordMic(outputPath: String, epoch: Date) async -> Never {
     fputs("meetey-capture: microphone recording started\n", stderr)
 
     let parent = getppid()
+    // A signal and the orphan check can both ask; the file is finished once.
+    let finishing = NSLock()
+    var finished = false
     let finish = {
+        guard finishing.withLock({ () -> Bool in
+            defer { finished = true }
+            return !finished
+        }) else { return }
         recorder.finish()
         fputs("meetey-capture: microphone recording saved to \(outputPath)\n", stderr)
-        exit(0)
+        Task {
+            await liveFinish(live)
+            exit(0)
+        }
     }
 
     var sources: [DispatchSourceSignal] = []

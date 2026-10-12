@@ -61,6 +61,12 @@ struct Args {
     let responsibleCheck: String?
     let verifyMic: Bool
     let preflightSpeech: Bool
+    /// Write live transcript and keyframe files here as the recording runs.
+    let liveDir: String?
+    let replayPath: String?
+    let replayMicPath: String?
+    let replayFramesDir: String?
+    let replaySpeed: Double
 
     static func parse() -> Args {
         var bundleID = ""
@@ -96,6 +102,11 @@ struct Args {
         var responsibleCheck: String? = nil
         var verifyMic = false
         var preflightSpeech = false
+        var liveDir: String? = nil
+        var replayPath: String? = nil
+        var replayMicPath: String? = nil
+        var replayFramesDir: String? = nil
+        var replaySpeed = 1.0
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -133,6 +144,11 @@ struct Args {
             case "--responsible-check": responsibleCheck = it.next()
             case "--verify-mic":      verifyMic = true
             case "--preflight-speech": preflightSpeech = true
+            case "--live":            liveDir = it.next()
+            case "--replay":          replayPath = it.next()
+            case "--replay-mic":      replayMicPath = it.next()
+            case "--replay-frames":   replayFramesDir = it.next()
+            case "--replay-speed":    replaySpeed = Double(it.next() ?? "") ?? 1
             default: break
             }
         }
@@ -148,7 +164,9 @@ struct Args {
                     watchIndicator: watchIndicator, stateFile: stateFile, plistPath: plistPath,
                     micPath: micPath, recordMic: recordMic, epochMs: epochMs,
                     responsibleCheck: responsibleCheck, verifyMic: verifyMic,
-                    preflightSpeech: preflightSpeech)
+                    preflightSpeech: preflightSpeech, liveDir: liveDir, replayPath: replayPath,
+                    replayMicPath: replayMicPath, replayFramesDir: replayFramesDir,
+                    replaySpeed: replaySpeed)
     }
 }
 
@@ -376,6 +394,9 @@ final class KeyframeWriter {
     // Touched only from workQueue.
     private var frames: [FrameRecord] = []
     private var truncated = false
+    /// When set, each keyframe is also announced here the moment it is written,
+    /// for readers that need the screen before the meeting ends.
+    var liveLog: LiveLog?
 
     /// Long edge of the persisted JPEG. Matches Claude's high-resolution image
     /// tier — anything larger costs storage without buying legibility.
@@ -546,6 +567,7 @@ final class KeyframeWriter {
     private func recordRevisit(file: String, offsetMs: Int) {
         guard let index = frames.firstIndex(where: { $0.file == file }) else { return }
         frames[index].revisitsMs = (frames[index].revisitsMs ?? []) + [offsetMs]
+        liveLog?.append(["offsetMs": offsetMs, "file": framesDir.appendingPathComponent(file).path, "revisit": true])
     }
 
     private func persist(pixelBuffer: CVPixelBuffer, seq: Int, offsetMs: Int, fingerprint: String) {
@@ -578,12 +600,16 @@ final class KeyframeWriter {
             return
         }
 
+        let text = (ocrText?.isEmpty ?? true) ? nil : ocrText
         frames.append(FrameRecord(
             file: name,
             offsetMs: offsetMs,
             fingerprint: fingerprint,
-            ocrText: (ocrText?.isEmpty ?? true) ? nil : ocrText
+            ocrText: text
         ))
+        var line: [String: Any] = ["offsetMs": offsetMs, "file": framesDir.appendingPathComponent(name).path]
+        if let text { line["ocrText"] = text }
+        liveLog?.append(line)
     }
 
     private func recognizeText(in pixelBuffer: CVPixelBuffer) -> String? {
@@ -1400,6 +1426,8 @@ final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
     /// Called when the stream stops, so the recording is finalised rather than
     /// left running against a dead one.
     var onStreamLost: (() -> Void)?
+    /// The call audio's live transcriber, fed the same samples as the WAV.
+    var live: AnyObject?
 
     init(writer: WAVWriter, keyframes: KeyframeWriter?) {
         self.writer = writer
@@ -1440,6 +1468,7 @@ final class CaptureDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
         )
         let samples = floats.map { Int16(max(-32768.0, min(32767.0, $0 * 32767.0))) }
         writer.append(samples: samples)
+        liveAppend(live, samples)
     }
 
     private func handleScreen(_ sampleBuffer: CMSampleBuffer) {
@@ -2309,6 +2338,16 @@ func record(args: Args) async throws {
     let writer = try WAVWriter(path: args.outputPath)
     let delegate = CaptureDelegate(writer: writer, keyframes: keyframes)
 
+    // Live output: the call's transcript and each keyframe, written as they
+    // happen (LiveOutput.swift). Started before capture so the transcript's
+    // clock begins at the recording's first sample; a model that still has to
+    // load or download never delays the recording.
+    if let liveDir = args.liveDir {
+        try? FileManager.default.createDirectory(atPath: liveDir, withIntermediateDirectories: true)
+        delegate.live = makeLiveTranscriber(directory: liveDir, speaker: "them")
+        keyframes?.liveLog = try? LiveLog(url: LiveFiles.frames(URL(fileURLWithPath: liveDir)))
+    }
+
     // One stream. Two streams bought nothing — the connection they share is
     // per-process, so they fail together — and cost an entire class of bug.
     let stream = SCStream(filter: filter, configuration: config, delegate: delegate)
@@ -2333,8 +2372,9 @@ func record(args: Args) async throws {
             return nil
         }
         let epochMs = String(Int(Date().timeIntervalSince1970 * 1000))
+        let live = args.liveDir.map { ["--live", $0] } ?? []
         guard let pid = Responsibility.spawnDisclaimed(["--record-mic", "--output", micPath,
-                                                        "--epoch-ms", epochMs]) else {
+                                                        "--epoch-ms", epochMs] + live) else {
             fputs("meetey-capture: could not start microphone recording — call audio only\n", stderr)
             return nil
         }
@@ -2511,6 +2551,7 @@ func record(args: Args) async throws {
     }
 
     try? await stream.stopCapture()
+    await liveFinish(delegate.live)
     if let indicator {
         await MainActor.run { indicator.remove() }
     }
@@ -2561,13 +2602,21 @@ final class IndicatorHost {
 
 Task {
     do {
-        if args.preflightSpeech {
+        if let replayPath = args.replayPath {
+            guard let liveDir = args.liveDir else {
+                fputs("meetey-capture: --replay needs --live <dir>\n", stderr)
+                exit(2)
+            }
+            await replay(callPath: replayPath, micPath: args.replayMicPath, framesDir: args.replayFramesDir,
+                         liveDir: liveDir, speed: args.replaySpeed)
+        } else if args.preflightSpeech {
             await preflightSpeech()
         } else if args.verifyMic {
             await verifyMic()
         } else if args.recordMic {
             await recordMic(outputPath: args.outputPath,
-                            epoch: args.epochMs.map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date())
+                            epoch: args.epochMs.map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date(),
+                            liveDir: args.liveDir)
         } else if let path = args.responsibleCheck {
             let me = getpid()
             let responsible = Responsibility.responsiblePid(for: me).map(String.init) ?? "unknown"

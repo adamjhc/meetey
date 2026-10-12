@@ -516,6 +516,36 @@ process, or a hang destroyed all of it. Every recording lost so far was lost thi
 way, and `repairWavHeader` exists only to salvage files written under the old
 behaviour.
 
+## Live output
+
+Every recording on macOS 26+ passes `--live <session>-live` (`MEETEY_NO_LIVE=1`
+turns it off) and writes, while it runs (`LiveOutput.swift`):
+
+- `transcript-them.jsonl` / `transcript-me.jsonl`: finished lines
+  `{speaker, startMs, endMs, text}` from SpeechTranscriber, fed the same samples
+  as each WAV, call audio in the parent and the mic in the helper. Separate
+  files because separate processes. No file ever has two writers.
+- `partial-them.json` / `partial-me.json`: the line still being spoken,
+  replaced atomically, cleared when it finishes.
+- `frames.jsonl`: each keyframe `{offsetMs, file, ocrText}` the moment it is
+  written, plus `{revisit: true}` lines when a screen returns.
+
+Times are counted in samples (`bufferStartTime`), so they line up with the WAVs
+and the post-meeting transcript. Audio that arrives while the model loads is
+buffered, not dropped, so a model download never delays the recording or skews
+the clock. Live transcription failing is logged once and changes nothing else.
+Whisper on the finished WAVs remains the canonical transcript.
+
+`mcp-server/live.js` turns the directory into one timeline: newline-terminated
+lines only, since a reader can catch a write mid-line, and the same Me/Them merge
+and echo filter as `transcript.js`. `npx adamjhc/meetey live` follows the running
+recording with it. It only reads files, so it is safe during a capture.
+
+`meetey-capture --replay <call.wav> [--replay-mic <mic.wav>] [--replay-frames
+<frames-dir>] --live <dir> [--replay-speed N]` plays a finished recording through
+the same pipeline and writes identical files. It is the test loop for anything
+that reads them.
+
 ## `preflight` checks the live assistant's dependencies
 
 `npx adamjhc/meetey preflight` (`cli/commands/preflight.js`) exercises what live

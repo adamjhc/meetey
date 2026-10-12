@@ -29,6 +29,7 @@ Commands:
   verify    Prove this machine can record and transcribe, by doing both
   preflight Check this machine can run the live assistant: live transcription,
             your microphone, and Claude Code headless on this account
+  live      Show the running meeting's transcript and screen text as it happens
   watch     Watch for meetings and offer to record them
             (enable | disable | status | logs)
 
@@ -60,6 +61,10 @@ switch (command) {
   case "verify": {
     const { verify } = await import("./commands/verify.js");
     process.exit(verify() ? 0 : 1);
+  }
+  case "live": {
+    const { live } = await import("./commands/live.js");
+    process.exit((await live(args[0])) ? 0 : 1);
   }
   case "preflight": {
     const { preflight } = await import("./commands/preflight.js");

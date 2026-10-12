@@ -164,7 +164,7 @@ private func synthesise(_ text: String, locale: Locale) async -> [AVAudioPCMBuff
 
 /// Converts a stream of buffers to the analyzer's format with one converter, so
 /// resampling state carries across chunk boundaries.
-private final class AudioChunkConverter {
+final class AudioChunkConverter {
     private let converter: AVAudioConverter
     private let format: AVAudioFormat
     private let ratio: Double

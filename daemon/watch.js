@@ -42,6 +42,7 @@ import { readActive, writeActive, clearActive, writePending, activeStatePath } f
 import { writeHealth, watchPaths } from "../mcp-server/watch-agent.js";
 import { resolveWhisper } from "../mcp-server/whisper.js";
 import { micPathFor, writeSessionTranscript } from "../mcp-server/transcript.js";
+import { livePathFor } from "../mcp-server/live.js";
 
 const HOME = homedir();
 const MEETEY_DIR = process.env.MEETEY_HOME ?? join(HOME, ".meetey");
@@ -320,6 +321,7 @@ function startRecording(window, mode) {
   const outputPath = join(RECORDINGS_DIR, `${sessionId}.wav`);
   const framesDir = mode === "screen" ? join(RECORDINGS_DIR, `${sessionId}-frames`) : null;
   const micPath = MIC_ENABLED ? micPathFor(outputPath) : null;
+  const liveDir = process.env.MEETEY_NO_LIVE === "1" ? null : livePathFor(outputPath);
   mkdirSync(RECORDINGS_DIR, { recursive: true });
 
   // Screen capture is still consented to per recording — the agent offers, the
@@ -344,6 +346,7 @@ function startRecording(window, mode) {
     args.push("--video", "--frames-dir", framesDir, "--window", String(window.windowID));
   }
   if (micPath) args.push("--mic", micPath);
+  if (liveDir) args.push("--live", liveDir);
 
   const child = spawn(CAPTURE_BINARY, args, { stdio: ["ignore", "ignore", "pipe"] });
   activeCapture = child;
@@ -391,6 +394,7 @@ function startRecording(window, mode) {
     // keyframe manifest, so a wrong value here loses the screen content.
     framesDir,
     micPath,
+    liveDir,
     startedAt,
     startedBy: "watch",
     windowTitle: window.title ?? "",

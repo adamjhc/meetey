@@ -56,6 +56,9 @@ jobs:
       - name: Transcript selftest
         run: node mcp-server/transcript.js --selftest
 
+      - name: Live reader selftest
+        run: node mcp-server/live.js --selftest
+
       # Run the packaged artifact, not the checkout: a file missing from
       # `files` in package.json only shows up here (see CLAUDE.md, Packaging).
       - name: Packaged MCP server answers tools/list

@@ -22,6 +22,8 @@ const WAV_RE = /^(meetey-\d+)\.wav$/;
 /** Your side of the call, recorded beside it. Part of the same session, never its own. */
 const MIC_WAV_RE = /^(meetey-\d+)-mic\.wav$/;
 const FRAMES_RE = /^(meetey-\d+)-frames$/;
+/** Written during the recording for the live view; part of the same session. */
+const LIVE_RE = /^(meetey-\d+)-live$/;
 
 /** Minimal YAML front matter reader — flat `key: value` only, no dependency. */
 export function parseFrontMatter(text) {
@@ -101,7 +103,7 @@ export function scanLibrary(recordingsDir) {
         hasVideo: false,
         keyframeCount: null,
         truncated: null,
-        files: { audio: null, mic: null, notes: null, transcript: null, frames: null },
+        files: { audio: null, mic: null, notes: null, transcript: null, frames: null, live: null },
       });
     }
     return sessions.get(id);
@@ -121,6 +123,13 @@ export function scanLibrary(recordingsDir) {
     const mic = entry.isFile() && entry.name.match(MIC_WAV_RE);
     if (mic) {
       touch(mic[1]).files.mic = fileEntry(full);
+      continue;
+    }
+
+    const live = entry.isDirectory() && entry.name.match(LIVE_RE);
+    if (live) {
+      const { bytes, count } = dirBytes(full);
+      touch(live[1]).files.live = { path: full, bytes, fileCount: count };
       continue;
     }
 

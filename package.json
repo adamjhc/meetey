@@ -25,6 +25,7 @@
     "mcp-server/update-check.js",
     "mcp-server/whisper.js",
     "mcp-server/transcript.js",
+    "mcp-server/live.js",
     "mcp-server/package.json",
     "daemon/",
     "meetey-capture/Sources",

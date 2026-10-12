@@ -158,6 +158,18 @@ That assessment is computed from the transcript itself (fragment rate, whisper l
 
 > **Chrome note:** **audio** is captured at the **process** level — all Chrome audio, not just the meeting tab — so mute any other tabs playing audio before starting. For **screen** capture you can narrow to a single window, which excludes the app's other windows and its notification banners. You cannot narrow to a tab: macOS offers no tab-level capture, so whatever tab that window is showing is what gets captured.
 
+## Live transcript
+
+On macOS 26 or later, every recording also transcribes as it goes, on-device with Apple's speech recognition. In a terminal:
+
+```bash
+npx adamjhc/meetey live
+```
+
+This follows the running recording and prints each line as it's finished, labelled **Me** or **Them**, with screen text as it appears. The sentence still being spoken shows greyed out. With no recording running, it prints the most recent one. It only reads files, so it's safe to run mid-call.
+
+The live transcript lives in `<session>-live/` and stays on your Mac. The transcript written after the meeting still comes from Whisper on the full recording. `MEETEY_NO_LIVE=1` turns live transcription off.
+
 ## Your microphone
 
 The meeting app's audio is what it *plays*, and it never plays your own voice back to you, so on its own a recording has everyone but you. Meetey therefore also records your microphone, to `<session>-mic.wav` beside the call audio, and the transcript interleaves the two as **Me** and **Them**.
@@ -300,6 +312,7 @@ npx adamjhc/meetey update          # Rebuild, refresh, restart the watcher, and 
 npx adamjhc/meetey status          # Show what's installed and whether everything is wired up
 npx adamjhc/meetey verify          # Prove this machine can record and transcribe
 npx adamjhc/meetey preflight       # Check the live assistant can run here: live transcription, mic, Claude headless
+npx adamjhc/meetey live            # The running meeting's transcript and screen text, as it happens
 
 npx adamjhc/meetey watch enable    # Watch for meetings and offer to record them
 npx adamjhc/meetey watch disable   # Stop watching

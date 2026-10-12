@@ -76,6 +76,13 @@ Teams ──► meetey-capture --live ──► <session>.wav             (uncha
 
 ## Phase 1 — Live output from `meetey-capture`
 
+**Done in 2.4.0**, with two changes to the plan: live output is written for
+every recording rather than behind a `--live` mode (local files, no consent
+change), and call and mic write separate `transcript-them/me.jsonl` and
+`partial-them/me.json` files because they come from separate processes.
+`npx adamjhc/meetey live` follows it in a terminal. See "Live output" in
+CLAUDE.md.
+
 1. `--live <dir>` flag. On each accepted keyframe, append
    `{"seq","offsetMs","file","ocr"}` to `frames.jsonl` (flushed per line) in
    addition to the existing end-of-meeting `index.json`.
