@@ -47,7 +47,9 @@ assembleApp({
 signApp({
   appBundle,
   entitlements: join(root, "meetey-capture", "entitlements.plist"),
-  identity: "Developer ID Application",
+  // The exact identity hash the workflow found valid, so codesign can't pick
+  // a different certificate or fail on name matching.
+  identity: process.env.SIGNING_IDENTITY ?? "Developer ID Application",
   keychain,
   timestamp: true,
 });

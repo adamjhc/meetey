@@ -127,7 +127,25 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
           rm "$RUNNER_TEMP/cert.p12"
+
+          # A .p12 exported from Keychain Access carries the certificate and key
+          # but not Apple's intermediate that issued it. Without the chain the
+          # identity is not valid, and codesign reports "no identity found".
+          for ca in DeveloperIDG2CA DeveloperIDCA; do
+            curl -fsSL "https://www.apple.com/certificateauthority/$ca.cer" -o "$RUNNER_TEMP/$ca.cer"
+            security import "$RUNNER_TEMP/$ca.cer" -k "$keychain" > /dev/null || true
+          done
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          # Names and hashes only; never the key.
+          security find-identity -p codesigning "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$identity" ]; then
+            echo "::error::No valid Developer ID Application identity in the imported certificate"
+            exit 1
+          fi
           echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
 
       - name: Assemble and sign Meetey.app
         if: steps.secrets.outputs.available == 'true'
