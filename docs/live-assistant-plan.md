@@ -50,9 +50,9 @@ These are load-bearing rules in Meetey and shape the design below:
   Accessibility permission.
 - **Privacy copy must be accurate:** in live mode, transcript and OCR text go
   to Claude during the call, not only afterwards.
-- **New Teams is `com.microsoft.teams2`.** Upstream only knows the classic
-  `com.microsoft.teams`; add the new ID to `supportedBundleIDs`, the watcher's
-  patterns and `APP_NAMES`.
+- **New Teams is `com.microsoft.teams2`.** Added in v2.1.1 (`supportedBundleIDs`,
+  the watcher's patterns, `APP_NAMES`). The watcher's title pattern for it is
+  still the classic one until checked against real meeting windows.
 - Packaging: every new `mcp-server/*.js` goes in `package.json` `files`; Apache
   header on new files; changes noted in `NOTICE`.
 

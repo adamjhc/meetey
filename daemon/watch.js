@@ -72,6 +72,9 @@ const MEETING_PATTERNS = [
   { bundleID: "com.google.Chrome", test: (t) => /google meet|meet\.google\.com|^meet\b|zoom\.us\/(j|wc)\/|teams\.microsoft\.com|whereby|meet\.jit\.si/i.test(t) },
   { bundleID: "us.zoom.xos", test: (t) => /zoom (meeting|webinar)/i.test(t) },
   { bundleID: "com.microsoft.teams", test: (t) => /meeting|\bcall\b/i.test(t) },
+  // New Teams, which replaced classic Teams and has its own bundle ID. Same
+  // pattern until it is checked against real meeting window titles.
+  { bundleID: "com.microsoft.teams2", test: (t) => /meeting|\bcall\b/i.test(t) },
 ];
 
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -182,6 +185,7 @@ const APP_NAMES = {
   "com.google.Chrome": "Chrome",
   "us.zoom.xos": "Zoom",
   "com.microsoft.teams": "Teams",
+  "com.microsoft.teams2": "Teams",
 };
 
 export const DECLINE = "Skip";
@@ -395,6 +399,26 @@ function startRecording(window, mode) {
   });
 }
 
+/**
+ * New Teams' meeting window titles have not been checked against real calls, so
+ * its pattern may miss meetings — and a missed meeting is unrecoverable. Each
+ * distinct New Teams title the pattern did *not* match is logged once, so
+ * `watch log` after a missed meeting shows what the pattern should have caught.
+ * New Teams only: logging every Chrome tab title would be noise.
+ */
+const unmatchedSeen = new Set();
+const LOG_UNMATCHED_FOR = new Set(["com.microsoft.teams2"]);
+
+function logUnmatchedTitles(windows, meeting) {
+  for (const window of windows) {
+    if (window === meeting || !LOG_UNMATCHED_FOR.has(window.bundleID) || !window.isOnScreen) continue;
+    const title = normalizeTitle(window.title);
+    if (!title || unmatchedSeen.has(title)) continue;
+    unmatchedSeen.add(title);
+    log(`not treated as a meeting — ${APP_NAMES[window.bundleID]}: "${title}"`);
+  }
+}
+
 async function tick() {
   if (prompting) return;
 
@@ -427,6 +451,7 @@ async function tick() {
   pausedFor = null;
   const windows = listWindows();
   const meeting = findMeeting(windows);
+  logUnmatchedTitles(windows, meeting);
 
   // Forget declines for windows that are gone, so the next meeting in a reused
   // window asks again.
@@ -469,6 +494,8 @@ function selfTest() {
     w("us.zoom.xos", "Zoom Meeting"),
     w("us.zoom.xos", "Zoom Webinar"),
     w("com.microsoft.teams", "Standup | Meeting"),
+    w("com.microsoft.teams2", "Standup | Meeting"),
+    w("com.microsoft.teams2", "Call with Priya Shah | Microsoft Teams"),
   ];
   const instant = [
     // An instant meeting can be titled just "Meet" — no dash to match on.
@@ -484,6 +511,7 @@ function selfTest() {
     w("com.google.Chrome", "Inbox (48) - Gmail"),
     w("com.google.Chrome", "meetey/README.md at main"),
     w("us.zoom.xos", "Zoom"),                    // the idle app window, not a call
+    w("com.microsoft.teams2", "Calls | Microsoft Teams"), // the Calls tab, not a call
     w("com.apple.Safari", "Zoom Meeting"),       // unsupported app
     w("com.google.Chrome", "Google Meet", { isOnScreen: false }), // minimised
   ];

@@ -70,6 +70,7 @@ const APP_NAMES = {
   "com.google.Chrome": "Chrome",
   "us.zoom.xos": "Zoom",
   "com.microsoft.teams": "Teams",
+  "com.microsoft.teams2": "Teams",
 };
 
 function sessionId() {

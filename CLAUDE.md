@@ -526,7 +526,8 @@ anything is written to disk and a stall there otherwise looks like success.
 |---|---|
 | Chrome (Google Meet / Teams web) | `com.google.Chrome` |
 | Zoom | `us.zoom.xos` |
-| Microsoft Teams (desktop) | `com.microsoft.teams` |
+| Microsoft Teams (classic desktop) | `com.microsoft.teams` |
+| Microsoft Teams (new desktop) | `com.microsoft.teams2` |
 
 ## Screen Capture
 

@@ -1819,7 +1819,7 @@ func shareableContent(timeout: TimeInterval = 15) async throws -> SCShareableCon
     }
 }
 
-let supportedBundleIDs = ["com.google.Chrome", "us.zoom.xos", "com.microsoft.teams"]
+let supportedBundleIDs = ["com.google.Chrome", "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2"]
 
 func listApps() async throws {
     let content = try await shareableContent()
