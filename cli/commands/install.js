@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, cpSync, writeFileSync, readFileSync, unlinkSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { green, yellow, red, step, run, which, downloadFile } from "../utils.js";
+import { assembleApp, installSignedApp, signApp } from "../app-bundle.js";
 import {
   PKG_DIR, MEETEY_DIR, MODELS_DIR, RECORDINGS_DIR,
   SERVER_DIR, DAEMON_DIR, CAPTURE_DIR, BINARY_PATH, BUILT_BINARY, APP_BUNDLE, MODEL_PATH, MODEL_URL,
@@ -72,9 +72,9 @@ export async function install() {
     green(`Model saved to ${MODEL_PATH}`);
   }
 
-  // --- Build Swift binary ---
+  // --- Meetey.app (signed release, or built from source) ---
   mkdirSync(RECORDINGS_DIR, { recursive: true });
-  buildCaptureApp();
+  await installCaptureApp();
 
   // --- Copy MCP server ---
   step("Installing MCP server");
@@ -128,43 +128,54 @@ export async function install() {
 }
 
 /**
- * Builds meetey-capture, wraps it in ~/.meetey/Meetey.app and signs the bundle.
+ * Puts a signed Meetey.app at ~/.meetey/Meetey.app.
  *
- * The bundle is there for the menu bar indicators. A bare executable's status
- * item has no app identity, and macOS (and menu bar managers built on it, like
- * Thaw or Ice) will not keep such an item shown or remember where it goes — it
- * disappears whenever other icons are hidden. Inside a bundle with a
- * CFBundleIdentifier it is an app like any other and can be pinned.
+ * Downloads the release's Developer ID-signed, notarized app when there is one:
+ * its signature identifies it by Team ID, so the microphone permission granted
+ * to it survives updates (see cli/app-bundle.js). Otherwise — a release without
+ * the app, a git checkout, or MEETEY_BUILD_FROM_SOURCE=1 — builds from source
+ * and signs ad hoc, which works but asks for the microphone again after every
+ * update.
  *
- * Rebuilt from scratch each time so nothing from an older layout survives.
+ * Either way the binary lives inside an app bundle: a bare executable's menu bar
+ * item has no app identity, and macOS (and managers like Thaw) will not keep it
+ * shown.
  */
-export function buildCaptureApp() {
+export async function installCaptureApp() {
+  const version = JSON.parse(readFileSync(join(PKG_DIR, "package.json"), "utf8")).version;
+  const fromSource = process.env.MEETEY_BUILD_FROM_SOURCE === "1" || existsSync(join(PKG_DIR, ".git"));
+
+  if (!fromSource) {
+    step(`Downloading the signed Meetey.app for v${version}`);
+    const result = await installSignedApp({ version, appBundle: APP_BUNDLE, workDir: MEETEY_DIR });
+    if (result.installed) {
+      green(`Installed: ${APP_BUNDLE} (signed by team ${result.teamId})`);
+      return;
+    }
+    yellow(`No signed app to install — ${result.reason}. Building from source instead.`);
+  }
+
   step("Building meetey-capture");
   cpSync(join(PKG_DIR, "meetey-capture"), CAPTURE_DIR, { recursive: true, force: true });
   run("swift build -c release", { cwd: CAPTURE_DIR });
   green("Swift build complete");
 
   step("Assembling Meetey.app");
-  const version = JSON.parse(readFileSync(join(PKG_DIR, "package.json"), "utf8")).version;
-  rmSync(APP_BUNDLE, { recursive: true, force: true });
-  mkdirSync(dirname(BINARY_PATH), { recursive: true });
-  cpSync(BUILT_BINARY, BINARY_PATH);
+  assembleApp({
+    builtBinary: BUILT_BINARY,
+    appBundle: APP_BUNDLE,
+    plistTemplate: join(CAPTURE_DIR, "Info.plist"),
+    version,
+  });
   // Only the copy inside the bundle may run. Left in place, the build output
   // is a working binary at an old, well-known path — the watcher ran it for
   // two releases, so its icons had no app identity. Removing it makes anything
   // still pointing there fail loudly instead.
   rmSync(BUILT_BINARY);
-  const plist = readFileSync(join(CAPTURE_DIR, "Info.plist"), "utf8").replaceAll("__VERSION__", version);
-  writeFileSync(join(APP_BUNDLE, "Contents", "Info.plist"), plist);
   green(`Assembled: ${APP_BUNDLE}`);
 
-  step("Code-signing Meetey.app");
-  execFileSync("codesign", [
-    "--force", "--sign", "-",
-    "--options", "runtime",
-    "--entitlements", join(CAPTURE_DIR, "entitlements.plist"),
-    APP_BUNDLE,
-  ]);
+  step("Code-signing Meetey.app (ad hoc)");
+  signApp({ appBundle: APP_BUNDLE, entitlements: join(CAPTURE_DIR, "entitlements.plist") });
   green(`Signed: ${APP_BUNDLE}`);
 }
 

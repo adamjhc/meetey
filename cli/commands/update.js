@@ -18,7 +18,7 @@ import { existsSync, cpSync } from "fs";
 import { join } from "path";
 import { green, yellow, red, step, run } from "../utils.js";
 import { PKG_DIR, BINARY_PATH, BUILT_BINARY, SERVER_DIR, DAEMON_DIR, SKILL_PATH, MEETEY_DIR, HOME } from "../paths.js";
-import { buildCaptureApp, registerMcpServer, installSkill, registerKeybindings } from "./install.js";
+import { installCaptureApp, registerMcpServer, installSkill, registerKeybindings } from "./install.js";
 
 export async function update() {
   // --- Verify installed ---
@@ -28,8 +28,8 @@ export async function update() {
     process.exit(1);
   }
 
-  // --- Rebuild Swift binary and Meetey.app ---
-  buildCaptureApp();
+  // --- Meetey.app (signed release, or rebuilt from source) ---
+  await installCaptureApp();
 
   // --- Update MCP server ---
   step("Updating MCP server");

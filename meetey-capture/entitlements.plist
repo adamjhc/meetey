@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.screen-capture</key>
-    <true/>
+    <!-- No screen-capture entitlement: there is no such thing. Screen Recording is
+         granted in System Settings only, and an unrecognised entitlement can fail
+         Developer ID signing checks. -->
     <!-- The hardened runtime refuses microphone access without this, silently. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>

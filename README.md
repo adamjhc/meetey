@@ -13,7 +13,7 @@ Recording and transcription happen entirely on your machine. No subscriptions, n
 
 ## Install
 
-Requires macOS 13+, Node.js 18+, and Xcode Command Line Tools.
+Requires macOS 13+ and Node.js 18+. Releases include a signed, notarized `Meetey.app` that install downloads; Xcode Command Line Tools are only needed when it has to build from source instead.
 
 ```bash
 npx adamjhc/meetey install
@@ -350,7 +350,7 @@ This is the only part of Meetey that contacts a server. It's an anonymous reques
 
 - macOS 13 (Ventura) or later
 - Node.js 18+
-- Xcode Command Line Tools (`xcode-select --install`)
+- Xcode Command Line Tools (`xcode-select --install`), only to build from source
 - Claude Code
 - Homebrew (installed automatically if missing)
 

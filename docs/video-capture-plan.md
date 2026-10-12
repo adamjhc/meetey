@@ -62,7 +62,8 @@ config.height = 2      // even for audio-only capture
 `addStreamOutput` registers only `.audio`, and `CaptureDelegate` early-returns on
 `guard type == .audio`.
 
-`entitlements.plist` already declares `com.apple.security.screen-capture` — the
+*(2.2.2: that key was removed — Apple DTS confirms it is not a real entitlement;
+Screen Recording is purely a TCC grant.)* `entitlements.plist` already declares `com.apple.security.screen-capture` — the
 *screen* entitlement. **No new permission, no new TCC prompt, no re-onboarding**
 for users who already granted Screen Recording.
 

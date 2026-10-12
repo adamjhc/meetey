@@ -69,14 +69,113 @@ jobs:
             | node mcp-server/index.js > tools.json
           grep -q '"start_recording"' tools.json
 
-  release:
+  # Builds, signs (Developer ID), notarizes and staples Meetey.app. install and
+  # update download it, so macOS's microphone grant survives updates: it is
+  # tied to the Team ID, not to one build's hash (cli/app-bundle.js).
+  #
+  # Without the signing secrets this is skipped and the release has no app;
+  # install then builds from source, signed ad hoc.
+  app:
     needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-26
+    outputs:
+      signed: ${{ steps.secrets.outputs.available }}
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+    steps:
+      - name: Signing secrets present
+        id: secrets
+        run: |
+          if [ -n "$MACOS_CERT_P12" ] && [ -n "$NOTARY_KEY_P8" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No signing secrets — this release ships without a signed Meetey.app, so install builds from source."
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.secrets.outputs.available == 'true'
+
+      - uses: actions/setup-node@v5
+        if: steps.secrets.outputs.available == 'true'
+        with:
+          node-version: 22
+
+      - name: Build meetey-capture
+        if: steps.secrets.outputs.available == 'true'
+        working-directory: meetey-capture
+        run: swift build -c release
+
+      - name: Import the Developer ID certificate
+        if: steps.secrets.outputs.available == 'true'
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Assemble and sign Meetey.app
+        if: steps.secrets.outputs.available == 'true'
+        run: node scripts/package-app.mjs dist
+
+      # A real signature is stricter than ad hoc about entitlements; an app the
+      # system refuses to launch must never be published.
+      - name: Signed app runs
+        if: steps.secrets.outputs.available == 'true'
+        run: dist/Meetey.app/Contents/MacOS/meetey-capture --selftest
+
+      - name: Notarize and staple
+        if: steps.secrets.outputs.available == 'true'
+        run: |
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --keepParent dist/Meetey.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple dist/Meetey.app
+          rm "$RUNNER_TEMP/notary.p8"
+          version=$(node -p 'require("./package.json").version')
+          ditto -c -k --keepParent dist/Meetey.app "dist/Meetey-$version.zip"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.secrets.outputs.available == 'true'
+        with:
+          name: meetey-app
+          path: dist/Meetey-*.zip
+          if-no-files-found: error
+
+      - name: Remove the signing keychain
+        if: always() && steps.secrets.outputs.available == 'true'
+        run: security delete-keychain "$KEYCHAIN" || true
+
+  # Published only after the app, so `update` never finds a release that is
+  # still missing the app it is about to look for.
+  release:
+    needs: [check, app]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/download-artifact@v4
+        if: needs.app.outputs.signed == 'true'
+        with:
+          name: meetey-app
+          path: dist
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+        run: |
+          shopt -s nullglob
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes dist/Meetey-*.zip

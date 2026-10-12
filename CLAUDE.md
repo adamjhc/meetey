@@ -233,8 +233,8 @@ and macOS — and menu bar managers built on it, such as Thaw and Ice — will n
 keep it shown or remember its place: it vanished whenever other icons were
 hidden, which defeats an indicator whose job is to be seen. So since 2.1.2 the
 binary runs from **`~/.meetey/Meetey.app`** (`com.adamjhcox.meetey`, `LSUIElement`,
-template in `meetey-capture/Info.plist`), assembled and signed by
-`buildCaptureApp()` in `cli/commands/install.js`. `BINARY_PATH` is the copy
+template in `meetey-capture/Info.plist`), put there by `installCaptureApp()` in
+`cli/commands/install.js` — see "Signed releases" below. `BINARY_PATH` is the copy
 inside the bundle; `BUILT_BINARY` is the build output, **deleted** once copied.
 Every launcher must point at the bundle: the watcher's plist sets
 `MEETEY_BINARY`, and the fallbacks in `daemon/watch.js` and
@@ -453,6 +453,26 @@ product name stays `meetey` (`/meetey`, `~/.meetey`, the package). Agents
 installed under the old `com.meetey.watch` label are removed by
 `removeLegacyWatch` on every enable, disable and update, and `update` carries an
 enabled old agent over to the new label.
+
+### Signed releases
+
+macOS ties a permission grant to the app's designated requirement. Ad hoc, that
+is the build's hash, so every update asked for the microphone again. A Developer
+ID signature is described by bundle ID and Team ID, which survive rebuilds.
+So the `app` job in `ci.yml` builds, signs (Developer ID, hardened runtime,
+timestamp), runs the signed binary's selftest, notarizes and staples Meetey.app,
+and the `release` job attaches `Meetey-<version>.zip`. `installCaptureApp()`
+downloads it via `installSignedApp` (`cli/app-bundle.js`). That checks the
+signature verifies and carries `APP_ID`, `TEAM_ID` and the right version before
+it renames it over the installed app. A rename, not a rewrite, so a running
+recording keeps its unlinked binary.
+
+It falls back to building from source, signed ad hoc, when `TEAM_ID` is null,
+the release has no app (no signing secrets), the download fails verification, the
+package is a git checkout, or `MEETEY_BUILD_FROM_SOURCE=1`. Setup of the secrets
+is in `docs/signing.md`. There is no screen-capture entitlement: Apple DTS
+confirms `com.apple.security.screen-capture` means nothing, and an unrecognised
+entitlement is a liability under a real signature.
 
 To release, from a clean `main`:
 
