@@ -516,6 +516,26 @@ process, or a hang destroyed all of it. Every recording lost so far was lost thi
 way, and `repairWavHeader` exists only to salvage files written under the old
 behaviour.
 
+## `preflight` checks the live assistant's dependencies
+
+`npx adamjhc/meetey preflight` (`cli/commands/preflight.js`) exercises what live
+mode will stack on top of recording, each of which a managed laptop can break
+quietly:
+
+- **Live transcription:** `meetey-capture --preflight-speech`
+  (`LiveSpeechCheck.swift`, macOS 26+). Resolves the user's locale with
+  SpeechTranscriber, installs the model through `AssetInventory` if needed (the
+  step an MDM is most likely to refuse), then transcribes a sentence synthesised
+  with AVSpeechSynthesizer and times it. No mic, no files, no permission prompt.
+- **Microphone:** `--verify-mic`, as `verify` does.
+- **Claude Code headless:** two stream-json round trips the way the panel will
+  make them: Sonnet with only the Read tool, reading a temp file containing a
+  random token, which proves tools are not blocked by policy; and Opus. It
+  reports model, account source (`apiKeySource: none` means the logged-in
+  account) and timings, plus any managed settings in
+  `/Library/Application Support/ClaudeCode/`. One short test prompt per model,
+  no meeting content.
+
 ## `--verify` runs the real thing
 
 `meetey-capture --verify` performs an actual short capture and checks permission,

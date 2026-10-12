@@ -299,6 +299,7 @@ npx adamjhc/meetey install         # First-time setup
 npx adamjhc/meetey update          # Rebuild, refresh, restart the watcher, and verify
 npx adamjhc/meetey status          # Show what's installed and whether everything is wired up
 npx adamjhc/meetey verify          # Prove this machine can record and transcribe
+npx adamjhc/meetey preflight       # Check the live assistant can run here: live transcription, mic, Claude headless
 
 npx adamjhc/meetey watch enable    # Watch for meetings and offer to record them
 npx adamjhc/meetey watch disable   # Stop watching

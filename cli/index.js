@@ -27,6 +27,8 @@ Commands:
             (install and update always use the latest tagged release)
   status    Show what's installed and whether everything is wired up correctly
   verify    Prove this machine can record and transcribe, by doing both
+  preflight Check this machine can run the live assistant: live transcription,
+            your microphone, and Claude Code headless on this account
   watch     Watch for meetings and offer to record them
             (enable | disable | status | logs)
 
@@ -58,6 +60,10 @@ switch (command) {
   case "verify": {
     const { verify } = await import("./commands/verify.js");
     process.exit(verify() ? 0 : 1);
+  }
+  case "preflight": {
+    const { preflight } = await import("./commands/preflight.js");
+    process.exit((await preflight()) ? 0 : 1);
   }
   case "watch": {
     const { watch } = await import("./commands/watch.js");

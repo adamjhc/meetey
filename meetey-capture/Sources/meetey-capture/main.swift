@@ -60,6 +60,7 @@ struct Args {
     /// Internal: write "<pid> <responsible pid>" to this path and exit.
     let responsibleCheck: String?
     let verifyMic: Bool
+    let preflightSpeech: Bool
 
     static func parse() -> Args {
         var bundleID = ""
@@ -94,6 +95,7 @@ struct Args {
         var epochMs: Double? = nil
         var responsibleCheck: String? = nil
         var verifyMic = false
+        var preflightSpeech = false
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -130,6 +132,7 @@ struct Args {
             case "--epoch-ms":        epochMs = Double(it.next() ?? "")
             case "--responsible-check": responsibleCheck = it.next()
             case "--verify-mic":      verifyMic = true
+            case "--preflight-speech": preflightSpeech = true
             default: break
             }
         }
@@ -144,7 +147,8 @@ struct Args {
                     callEndGrace: callEndGrace, menuBar: menuBar, label: label,
                     watchIndicator: watchIndicator, stateFile: stateFile, plistPath: plistPath,
                     micPath: micPath, recordMic: recordMic, epochMs: epochMs,
-                    responsibleCheck: responsibleCheck, verifyMic: verifyMic)
+                    responsibleCheck: responsibleCheck, verifyMic: verifyMic,
+                    preflightSpeech: preflightSpeech)
     }
 }
 
@@ -2557,7 +2561,9 @@ final class IndicatorHost {
 
 Task {
     do {
-        if args.verifyMic {
+        if args.preflightSpeech {
+            await preflightSpeech()
+        } else if args.verifyMic {
             await verifyMic()
         } else if args.recordMic {
             await recordMic(outputPath: args.outputPath,

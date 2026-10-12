@@ -29,6 +29,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreMedia"),
                 .linkedFramework("CoreAudio"),
+                .linkedFramework("Speech"),
             ]
         )
     ]

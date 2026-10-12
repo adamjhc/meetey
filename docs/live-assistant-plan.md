@@ -165,6 +165,13 @@ Developed here, run on the work laptop (Teams, Xcode CLT and Homebrew available)
   re-signed ad hoc. `verify` already catches it; if it is a nuisance, sign with
   a stable local identity instead.
 
+## Preflight (2.3.0)
+
+`npx adamjhc/meetey preflight` checks the dependencies on the target machine
+before Phase 1 relies on them. On the dev Mac: en_GB supported, model installed,
+4.3s of speech transcribed in 0.3s (first words after 0.1s); Sonnet with the Read
+tool answered in 5.3s, Opus in 2.0s.
+
 ## Testing
 
 - `--replay` over existing recordings: transcript latency (speech → line in
