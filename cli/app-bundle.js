@@ -38,11 +38,11 @@ import { downloadFile } from "./utils.js";
 export const APP_ID = "com.adamjhcox.meetey";
 
 /**
- * The Apple Developer Team whose signature a downloaded Meetey.app must carry.
- * Checked before anything downloaded replaces the installed app; null means no
- * signed release is trusted yet, so install builds from source.
+ * The Apple Developer Team whose signature a downloaded Meetey.app must carry
+ * (Adam Cox). Checked before anything downloaded replaces the installed app;
+ * null would mean no signed release is trusted, so install builds from source.
  */
-export const TEAM_ID = null;
+export const TEAM_ID = "86CB3GP2UH";
 
 /** Release asset name for a version. */
 export const appAssetName = (version) => `Meetey-${version}.zip`;
