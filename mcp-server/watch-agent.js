@@ -176,12 +176,47 @@ function isLoaded(label = WATCH_LABEL) {
   }
 }
 
+/**
+ * How long to wait for an unloaded agent to actually go.
+ *
+ * `launchctl bootout` returns as soon as it has signalled the job, but launchd
+ * keeps the label registered until the process exits — and the watcher's
+ * SIGTERM handler deliberately waits up to 15s to finish a running capture.
+ * Bootstrapping the same label before then fails with "Bootstrap failed: 5:
+ * Input/output error", which is how `update` came to report it could not
+ * restart the watcher and leave it off.
+ */
+const UNLOAD_TIMEOUT_MS = 20_000;
+
 function bootout(label = WATCH_LABEL) {
   try {
     execFileSync("launchctl", ["bootout", `gui/${process.getuid()}/${label}`], { stdio: "ignore" });
   } catch {
     // Not loaded, which is the state we were aiming for anyway.
   }
+  waitFor(UNLOAD_TIMEOUT_MS, () => !isLoaded(label));
+}
+
+/**
+ * Loads the agent, retrying briefly: even after the label is gone launchd can
+ * refuse for a moment. Throws with launchctl's own reason, which the bare
+ * "Command failed" message used to hide.
+ */
+function bootstrap(plistPath) {
+  let reason = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) waitFor(1000, () => false);
+    try {
+      execFileSync("launchctl", ["bootstrap", `gui/${process.getuid()}`, plistPath], {
+        stdio: ["ignore", "ignore", "pipe"],
+        encoding: "utf8",
+      });
+      return;
+    } catch (e) {
+      reason = String(e.stderr || e.message).split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "";
+    }
+  }
+  throw new Error(`launchctl bootstrap failed — ${reason}`);
 }
 
 /**
@@ -245,7 +280,12 @@ export function watchMessage({ available, installed, running, canSeeWindows }) {
   return "The watcher is off.";
 }
 
-export function enableWatch({ meeteyDir, home, nodePath, captureBinary }) {
+/**
+ * `progressStream` is where the "checking" line goes. The CLI shows it on
+ * stdout; the MCP server must pass stderr, because its stdout *is* the
+ * protocol and a stray line there corrupts the reply.
+ */
+export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progressStream = process.stdout }) {
   const paths = watchPaths({ meeteyDir, home });
 
   if (!existsSync(paths.scriptPath)) {
@@ -270,16 +310,20 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary }) {
     // Replace any previous version rather than stacking two agents.
     removeLegacyWatch({ home });
     bootout();
-    execFileSync("launchctl", ["bootstrap", `gui/${process.getuid()}`, paths.plistPath], { stdio: "ignore" });
+    bootstrap(paths.plistPath);
   } catch (e) {
-    return { error: `Could not start the watcher: ${e.message.split("\n")[0]}` };
+    return {
+      error: `Could not start the watcher: ${e.message.split("\n")[0]}`,
+      fix: "Run `npx adamjhc/meetey watch enable` again in a minute. If it keeps failing, " +
+        `\`launchctl print gui/${process.getuid()}/${WATCH_LABEL}\` shows what launchd thinks of it.`,
+    };
   }
 
   // Wait for the agent to report what it can actually see. Declaring success
   // without this is how a watcher ends up installed, running, and permanently
   // blind — the failure logs one line every ten seconds and shows the user
   // nothing at all.
-  const spinner = progress("Checking it can see your windows");
+  const spinner = progress("Checking it can see your windows", { stream: progressStream });
   const reported = waitFor(
     25_000,
     () => readHealth({ meeteyDir, home }) !== null,
