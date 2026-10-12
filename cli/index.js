@@ -30,6 +30,7 @@ Commands:
   preflight Check this machine can run the live assistant: live transcription,
             your microphone, and Claude Code headless on this account
   live      Show the running meeting's transcript and screen text as it happens
+  assistant Open the in-call assistant panel for the running (or latest) meeting
   watch     Watch for meetings and offer to record them
             (enable | disable | status | logs)
 
@@ -61,6 +62,10 @@ switch (command) {
   case "verify": {
     const { verify } = await import("./commands/verify.js");
     process.exit(verify() ? 0 : 1);
+  }
+  case "assistant": {
+    const { assistant } = await import("./commands/assistant.js");
+    process.exit((await assistant(args[0])) ? 0 : 1);
   }
   case "live": {
     const { live } = await import("./commands/live.js");

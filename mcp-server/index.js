@@ -44,7 +44,7 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 // Reported as this server's identity to Claude Code, and compared against the
 // latest release. One constant so the two can never disagree — keep it in step
 // with package.json and mcp-server/package.json when bumping.
-const SERVER_VERSION = "2.4.1";
+const SERVER_VERSION = "2.5.0";
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
@@ -279,6 +279,10 @@ function startRecording({
   // only; macOS 26+, and the recording never depends on it.
   const liveDir = process.env.MEETEY_NO_LIVE === "1" ? null : livePathFor(outputPath);
   if (liveDir) args.push("--live", liveDir);
+
+  // The in-call assistant panel, opened as the recording starts. Meeting text
+  // goes to Claude only when the user asks it something there.
+  if (liveDir && process.env.MEETEY_NO_ASSISTANT !== "1") args.push("--assistant");
 
   // On by default. It only ends a recording on signals that cannot mean anything
   // else — the app quit, or the explicitly-chosen window closed — and the failure

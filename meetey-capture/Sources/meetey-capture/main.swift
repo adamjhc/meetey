@@ -67,6 +67,16 @@ struct Args {
     let replayMicPath: String?
     let replayFramesDir: String?
     let replaySpeed: Double
+    /// Open the in-call assistant (Panel/) when this recording starts.
+    let assistant: Bool
+    /// Internal: run as the assistant panel for `liveDir`.
+    let panel: Bool
+    let title: String
+    let startedAtMs: Double?
+    let capturePid: pid_t?
+    let claudePath: String?
+    let panelAsk: [String]
+    let model: String
 
     static func parse() -> Args {
         var bundleID = ""
@@ -107,6 +117,14 @@ struct Args {
         var replayMicPath: String? = nil
         var replayFramesDir: String? = nil
         var replaySpeed = 1.0
+        var assistant = false
+        var panel = false
+        var title = ""
+        var startedAtMs: Double? = nil
+        var capturePid: pid_t? = nil
+        var claudePath: String? = nil
+        var panelAsk: [String] = []
+        var model = "sonnet"
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -149,6 +167,14 @@ struct Args {
             case "--replay-mic":      replayMicPath = it.next()
             case "--replay-frames":   replayFramesDir = it.next()
             case "--replay-speed":    replaySpeed = Double(it.next() ?? "") ?? 1
+            case "--assistant":       assistant = true
+            case "--panel":           panel = true
+            case "--title":           title = it.next() ?? ""
+            case "--started-at":      startedAtMs = Double(it.next() ?? "")
+            case "--capture-pid":     capturePid = pid_t(it.next() ?? "")
+            case "--claude":          claudePath = it.next()
+            case "--panel-ask":       if let q = it.next() { panelAsk.append(q) }
+            case "--model":           model = it.next() ?? "sonnet"
             default: break
             }
         }
@@ -166,7 +192,9 @@ struct Args {
                     responsibleCheck: responsibleCheck, verifyMic: verifyMic,
                     preflightSpeech: preflightSpeech, liveDir: liveDir, replayPath: replayPath,
                     replayMicPath: replayMicPath, replayFramesDir: replayFramesDir,
-                    replaySpeed: replaySpeed)
+                    replaySpeed: replaySpeed, assistant: assistant, panel: panel, title: title,
+                    startedAtMs: startedAtMs, capturePid: capturePid, claudePath: claudePath,
+                    panelAsk: panelAsk, model: model)
     }
 }
 
@@ -860,6 +888,8 @@ final class RecordingIndicator: NSObject {
     private let onKeepRecording: () -> Void
     /// Nil when the mic is not being recorded, which hides the item.
     private let onMicPaused: ((Bool) -> Void)?
+    /// Nil when there is no assistant for this recording.
+    private let onShowAssistant: (() -> Void)?
     private var micPaused = false
     private var timer: Timer?
     private var state: State = .recording
@@ -868,13 +898,14 @@ final class RecordingIndicator: NSObject {
     private let statusItem = NSMenuItem()
     private let keepItem = NSMenuItem()
     private let micItem = NSMenuItem()
+    private let assistantItem = NSMenuItem()
     private let stopItem = NSMenuItem()
 
     /// Returns nil when there is no GUI session to draw into — an ssh shell, say.
     /// A missing indicator must never take the recording down with it.
     init?(label: String, startedAt: Date, capturingVideo: Bool,
           onStop: @escaping () -> Void, onKeepRecording: @escaping () -> Void,
-          onMicPaused: ((Bool) -> Void)? = nil) {
+          onMicPaused: ((Bool) -> Void)? = nil, onShowAssistant: (() -> Void)? = nil) {
         guard !NSScreen.screens.isEmpty else { return nil }
 
         self.startedAt = startedAt
@@ -883,6 +914,7 @@ final class RecordingIndicator: NSObject {
         self.onStop = onStop
         self.onKeepRecording = onKeepRecording
         self.onMicPaused = onMicPaused
+        self.onShowAssistant = onShowAssistant
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -920,6 +952,12 @@ final class RecordingIndicator: NSObject {
         micItem.target = self
         micItem.isHidden = onMicPaused == nil
         menu.addItem(micItem)
+
+        assistantItem.title = "Show Assistant (\(HotKey.label))"
+        assistantItem.action = #selector(assistantClicked)
+        assistantItem.target = self
+        assistantItem.isHidden = onShowAssistant == nil
+        menu.addItem(assistantItem)
 
         stopItem.title = "Stop Recording"
         stopItem.action = #selector(stopClicked)
@@ -1035,6 +1073,10 @@ final class RecordingIndicator: NSObject {
     @objc private func keepClicked() {
         setState(.recording)
         onKeepRecording()
+    }
+
+    @objc private func assistantClicked() {
+        onShowAssistant?()
     }
 
     @objc private func micClicked() {
@@ -2383,6 +2425,17 @@ func record(args: Args) async throws {
     }()
     let ownPids: Set<pid_t> = micPid.map { [getpid(), $0] } ?? [getpid()]
 
+    // The in-call assistant: a separate process reading this recording's live
+    // files, so nothing it does can affect the capture.
+    let showAssistant: (() -> Void)? = {
+        guard args.assistant, let liveDir = args.liveDir else { return nil }
+        let title = args.label.isEmpty ? "Meeting" : args.label
+        let framesDir = keyframes == nil ? nil : (args.framesDir ?? URL(fileURLWithPath: args.outputPath)
+            .deletingPathExtension().path + "-frames")
+        return { PanelProcess.showOrLaunch(liveDir: liveDir, title: title, framesDir: framesDir, startedAt: startedAt) }
+    }()
+    showAssistant?()
+
     // Use AsyncStream to bridge DispatchSource signal handlers into async context
     let (stopStream, stopContinuation) = AsyncStream<Void>.makeStream()
 
@@ -2443,7 +2496,7 @@ func record(args: Args) async throws {
             RecordingIndicator(label: menuLabel, startedAt: startedAt,
                                capturingVideo: capturingVideo,
                                onStop: fireOnce, onKeepRecording: keepRecording,
-                               onMicPaused: onMicPaused)
+                               onMicPaused: onMicPaused, onShowAssistant: showAssistant)
         }
         if made == nil {
             fputs("meetey-capture: no GUI session — recording without a menu bar indicator\n", stderr)
@@ -2602,7 +2655,16 @@ final class IndicatorHost {
 
 Task {
     do {
-        if let replayPath = args.replayPath {
+        if !args.panelAsk.isEmpty, let liveDir = args.liveDir {
+            await panelAsk(questions: args.panelAsk, liveDir: liveDir, framesDir: args.framesDir,
+                           model: args.model, claude: args.claudePath)
+        } else if args.panel, let liveDir = args.liveDir {
+            let started = args.startedAtMs.map { Date(timeIntervalSince1970: $0 / 1000) }
+            await MainActor.run {
+                runPanel(liveDir: liveDir, title: args.title, framesDir: args.framesDir,
+                         startedAt: started, capturePid: args.capturePid, claude: args.claudePath)
+            }
+        } else if let replayPath = args.replayPath {
             guard let liveDir = args.liveDir else {
                 fputs("meetey-capture: --replay needs --live <dir>\n", stderr)
                 exit(2)
@@ -2689,14 +2751,14 @@ Task {
             }
             try await record(args: args)
         }
-        if !args.watchIndicator { exit(0) }
+        if !args.watchIndicator && !args.panel { exit(0) }
     } catch {
         fputs("meetey-capture: error: \(error.localizedDescription)\n", stderr)
         exit(1)
     }
 }
 
-if args.menuBar || args.watchIndicator {
+if args.menuBar || args.watchIndicator || args.panel {
     // A status item needs AppKit's run loop and an activation policy that keeps
     // the process out of the Dock and the app switcher. `.accessory` is what
     // makes an unbundled binary able to own a menu bar item at all.

@@ -221,7 +221,8 @@ function askToRecord(window) {
     : "";
   const message =
     `Meetey noticed a meeting in ${app}:\n\n${title}\n\n` +
-    `Record it? "${AUDIO_AND_SCREEN}" captures only this window. ${mic}It stops on ` +
+    `Record it? "${AUDIO_AND_SCREEN}" captures only this window. ${mic}The assistant ` +
+    `opens beside the call (⌃⌥M). It stops on ` +
     `its own when the call ends; run /meetey stop in Claude Code to write up ` +
     `the notes.`;
 
@@ -347,6 +348,7 @@ function startRecording(window, mode) {
   }
   if (micPath) args.push("--mic", micPath);
   if (liveDir) args.push("--live", liveDir);
+  if (liveDir && process.env.MEETEY_NO_ASSISTANT !== "1") args.push("--assistant");
 
   const child = spawn(CAPTURE_BINARY, args, { stdio: ["ignore", "ignore", "pipe"] });
   activeCapture = child;

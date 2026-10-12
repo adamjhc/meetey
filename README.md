@@ -158,6 +158,19 @@ That assessment is computed from the transcript itself (fragment rate, whisper l
 
 > **Chrome note:** **audio** is captured at the **process** level — all Chrome audio, not just the meeting tab — so mute any other tabs playing audio before starting. For **screen** capture you can narrow to a single window, which excludes the app's other windows and its notification banners. You cannot narrow to a tab: macOS offers no tab-level capture, so whatever tab that window is showing is what gets captured.
 
+## In-call assistant
+
+When a recording starts, a small Meetey panel opens beside the call. Ask it about anything said or shown, such as "what's causing the NPE on screen?" or "what did we agree for this ticket?", and Claude answers while the meeting carries on.
+
+- **It's hidden from screen shares.** It floats over the call, follows you across Spaces and full-screen meetings, and is excluded from screen capture, so sharing your screen never shows it. **⌃⌥M** shows or hides it; **Show Assistant** in the menu bar icon does the same.
+- **Each question carries what's new since the last one:** transcript lines, screen text and keyframe paths. Claude keeps the conversation, so it already has the rest. **Note** tells it something without asking; **Pinned notes** go with every question; the screen button attaches the current screen as an image.
+- **Quick actions:** *Extract logs*, *Last 5 min*, *Draft ticket*, *Decisions*.
+- **Sonnet by default, Opus one click away.** Switching keeps the conversation.
+- **It can only look.** Claude gets the Read tool, for keyframe images, and nothing else: no shell, no edits, no MCP servers. Meeting content is treated as material to analyse, never as instructions, so a slide saying "ignore your instructions" is reported, not obeyed.
+- **The conversation is saved** to `<session>-live/chat.md`, so the write-up can include it.
+
+It uses whichever account Claude Code is logged in to on that Mac. Close it and `npx adamjhc/meetey assistant` reopens it. `MEETEY_NO_ASSISTANT=1` stops it opening.
+
 ## Live transcript
 
 On macOS 26 or later, every recording also transcribes as it goes, on-device with Apple's speech recognition. In a terminal:
@@ -298,6 +311,7 @@ Search is the one worth knowing about. Asking *"what did we decide about the API
 | Meeting audio (the WAV), and your microphone (`-mic.wav`) | The transcript text |
 | Screen keyframes (the JPEGs) | Recognized on-screen text (OCR) |
 | Whisper transcription — runs locally | A few keyframe **images**, only when text isn't enough |
+| The live transcript and screen text (`-live/`) | What's new in the meeting, **only when you ask the in-call assistant something** |
 | Vision OCR — runs on-device | |
 
 Nothing is uploaded to a third-party meeting service, and no bot joins your call. Audio and images never leave your machine unless Claude needs a specific keyframe to interpret a diagram. Summarization itself runs through Claude, so the *text* does go to the API — the same as anything else you'd paste into Claude Code.
@@ -313,6 +327,7 @@ npx adamjhc/meetey status          # Show what's installed and whether everythin
 npx adamjhc/meetey verify          # Prove this machine can record and transcribe
 npx adamjhc/meetey preflight       # Check the live assistant can run here: live transcription, mic, Claude headless
 npx adamjhc/meetey live            # The running meeting's transcript and screen text, as it happens
+npx adamjhc/meetey assistant       # Reopen the in-call assistant panel
 
 npx adamjhc/meetey watch enable    # Watch for meetings and offer to record them
 npx adamjhc/meetey watch disable   # Stop watching

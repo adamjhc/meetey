@@ -30,6 +30,8 @@ let package = Package(
                 .linkedFramework("CoreMedia"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("Speech"),
+                .linkedFramework("SwiftUI"),
+                .linkedFramework("Carbon"),
             ]
         )
     ]

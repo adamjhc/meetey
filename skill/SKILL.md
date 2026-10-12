@@ -61,7 +61,7 @@ Meetey — local meeting capture
    **Screen capture is not narrowed to a window.** It covers everything the app displays. Scoping to a window was tried and repeatedly cost recordings: replacing a captured window — which Google Meet does when you join a call — kills the whole capture, audio included. Never offer window selection as a privacy control.
 
 7. Call `start_recording` with the chosen `bundleID`, `captureVideo: true` only if the user explicitly opted in, and `windowID`/`displayID` when the user chose them. Pass `label` too — the window title if one was listed, otherwise the app name — so the menu bar indicator names what it is recording rather than saying "Meeting".
-8. Confirm to the user: "Recording started[, capturing screen content from <window title>]. Stop it from the menu bar, with `/meetey stop`, or with `Ctrl+Shift+S`." When the result has `capturingMic: true`, add: "Your microphone is recorded too, so your side is in the transcript — **including while you're muted in the meeting app**. Pause it from the Meetey menu bar icon." The first mic recording makes macOS ask whether Meetey may use the microphone; say so the first time.
+8. Confirm to the user: "Recording started[, capturing screen content from <window title>]. Stop it from the menu bar, with `/meetey stop`, or with `Ctrl+Shift+S`." When the result has `capturingMic: true`, add: "Your microphone is recorded too, so your side is in the transcript — **including while you're muted in the meeting app**. Pause it from the Meetey menu bar icon." The first mic recording makes macOS ask whether Meetey may use the microphone; say so the first time. When the result has a `liveDir`, the in-call assistant panel opens beside the call: mention once that **⌃⌥M** shows or hides it, and that it's hidden from their screen shares.
 
 **Your microphone.** `start_recording` records it by default (`captureMic`), because the meeting app's audio never contains the user's own voice — without it their half of the meeting is missing. Pass `captureMic: false` if they don't want it.
 
@@ -87,9 +87,10 @@ The recording also ends itself if the app quits, or if the chosen window closes 
    - `durationMs` / `durationLabel` — exact length, read from the WAV header
    - `model` — the Whisper model that produced this
    - `quality` — `{ level, reason, spokenWordsPerMinute, degradedRatio, silenceRatio }`, where `level` is `good`, `fair`, `poor`, or `unusable`
-4. If the stop result includes `framesDir`, call `get_keyframes` with it. Each frame has `path`, `offsetMs`, and usually `ocrText`. A frame may also have `revisitsMs`: later offsets at which that same screen came back on stage. Treat those as additional timestamps for the same content — a slide the group returned to is usually one they argued about, and it is worth a Screen Content line at the offset it came back, not just when it first appeared.
-5. If transcription fails, report the error and point the user at the Troubleshooting table in the README.
-6. If the result carries `recovered`, say so once: the recording had been interrupted and its audio was salvaged. It explains a duration that looks different from what the user remembers, and it is reassuring rather than alarming — the audio was not lost.
+4. If `<sessionId>-live/chat.md` exists beside the WAV, read it: it is the user's conversation with the in-call assistant during the meeting. Questions they asked often mark what mattered, and answers may contain extracted logs worth keeping. Don't reproduce it wholesale; use it to inform the notes.
+5. If the stop result includes `framesDir`, call `get_keyframes` with it. Each frame has `path`, `offsetMs`, and usually `ocrText`. A frame may also have `revisitsMs`: later offsets at which that same screen came back on stage. Treat those as additional timestamps for the same content — a slide the group returned to is usually one they argued about, and it is worth a Screen Content line at the offset it came back, not just when it first appeared.
+6. If transcription fails, report the error and point the user at the Troubleshooting table in the README.
+7. If the result carries `recovered`, say so once: the recording had been interrupted and its audio was salvaged. It explains a duration that looks different from what the user remembers, and it is reassuring rather than alarming — the audio was not lost.
 
 ### Interpret
 
@@ -152,7 +153,7 @@ Full transcript: [`<notes-stem>-transcript.md`] · [N] words · [model]
    frames: meetey-1754049600-frames/    # omit when audio-only
    ---
    ```
-2. **Transcript** → the same stem with `-transcript.md`. Front matter linking back to the notes, then the transcript as timestamped paragraphs — one line per segment, `**[mm:ss]** text` — not one undifferentiated block. This is the file a reader jumps into from a timestamp, so it has to be navigable.
+2. **Transcript** → the same stem with `-transcript.md`. Front matter linking back to the notes, then the transcript as timestamped paragraphs — one line per segment, `**[mm:ss]** text`, or `**[mm:ss] Me:** text` / `**[mm:ss] Them:** text` when segments carry a `speaker`. Not one undifferentiated block. This is the file a reader jumps into from a timestamp, so it has to be navigable.
 3. Tell the user, briefly — this is a receipt, not a second copy of the document:
    > Notes: `<notes path>`
    > Transcript: `<transcript path>` · Audio: `<wav path>`

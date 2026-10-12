@@ -546,6 +546,41 @@ recording with it. It only reads files, so it is safe during a capture.
 the same pipeline and writes identical files. It is the test loop for anything
 that reads them.
 
+## The in-call assistant
+
+`--assistant` (passed by `start_recording` and the watcher with live output;
+`MEETEY_NO_ASSISTANT=1` turns it off) makes the capture start
+`meetey-capture --panel` as a **separate process**, so nothing the UI or Claude
+does can affect a capture. It is the same signed binary, so it has the same app
+identity. One panel per live directory, tracked by `panel.pid`. Later launches,
+and the menu bar's "Show Assistant", bring it forward through a distributed
+notification. Code is in `Sources/meetey-capture/Panel/`:
+
+- **`AssistantPanel`**: `NSPanel`, floating, non-activating so it takes
+  typing without pulling Meetey in front of the call, all Spaces and full-screen
+  meetings, and **`sharingType = .none`** so it never appears in the user's
+  own screen share. ⌃⌥M through Carbon `RegisterEventHotKey`, which needs no
+  Accessibility permission and only shows or hides the panel, never starts
+  anything.
+- **`MeetingContext`**: Swift twin of `mcp-server/live.js`, with the same rules.
+  Each question carries what Claude hasn't seen, tracked **per line and frame,
+  not by a time cursor**, because a line that started before the last question
+  can finish after it. Meeting content is wrapped in `<meeting_update>` and
+  escaped so it can't close the tag. Notes, pinned notes and the user's request
+  sit outside it. `meetingSystemPrompt` says meeting content is material, never
+  instructions.
+- **`ClaudeSession`**: one long-lived `claude -p` stream-json process with
+  `--include-partial-messages`, `--tools Read --allowedTools Read
+  --strict-mcp-config` (Read only, no MCP servers: meeting content is untrusted),
+  `--add-dir` for the keyframes, cwd the live dir. A model switch restarts it
+  with `--resume`, and so does a crash on the next question. `ClaudeLocator`
+  finds `claude` without trusting PATH, since the watcher runs under launchd.
+- Every exchange is appended to `<session>-live/chat.md`.
+
+`meetey-capture --panel-ask "<q>" [--panel-ask …] --live <dir>` runs the whole
+question path headless, printing what the panel would show. With `--replay`
+output it is the test loop; `MEETEY_SHOW_PROMPT=1` prints each message sent.
+
 ## `preflight` checks the live assistant's dependencies
 
 `npx adamjhc/meetey preflight` (`cli/commands/preflight.js`) exercises what live

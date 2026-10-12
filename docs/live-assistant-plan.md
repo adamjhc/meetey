@@ -104,6 +104,13 @@ CLAUDE.md.
 
 ## Phase 2 — `meetey-panel`
 
+**Done in 2.5.0, together with Phases 3 and 4.** It's a `--panel` mode of the
+same signed binary rather than a separate target, so there is one executable to
+sign and one app identity. Recordings open it with `--assistant`. See "The in-call
+assistant" in CLAUDE.md. Verified headless with `--panel-ask` against replayed
+meetings: deltas, verbatim logs, and an injected "ignore your instructions" slide
+reported rather than obeyed. The window itself is untested on a real call.
+
 New executable target in `meetey-capture/Package.swift` (separate process, same
 reason the indicator is one: a UI crash must never cost a recording).
 
