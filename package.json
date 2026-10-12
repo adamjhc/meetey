@@ -3,7 +3,10 @@
   "version": "2.4.1",
   "description": "Local-first meeting capture and transcription for Claude Code",
   "type": "module",
-  "author": "John Joseph",
+  "author": "Adam Cox",
+  "contributors": [
+    "John Joseph (original Meetey, https://github.com/jej2k5/meetey)"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/adamjhc/meetey.git"
