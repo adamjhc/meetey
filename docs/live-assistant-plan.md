@@ -1,6 +1,6 @@
 # Implementation Plan: Live Assistant
 
-Status: **planned**
+Status: **built (2.5.0), awaiting real-call testing**. See "Remaining" at the end.
 Branch: `live-assistant` (fork: `adamjhc/meetey`)
 
 ## Goal
@@ -22,7 +22,7 @@ work laptop this is the company Claude account.
 
 | Topic | Decision | Why |
 |---|---|---|
-| Start | Keep the watcher's one-click prompt; accepting starts live capture and opens the panel | Preserves per-recording consent |
+| Start | Keep the watcher's one-click prompt. Every recording writes live files and opens the assistant (changed from a separate "live" choice) | Live files stay local; meeting text reaches Claude only when the user asks, so recording consent is unchanged |
 | Live ASR | Apple SpeechAnalyzer / SpeechTranscriber | True streaming, on-device, beats `base.en` on conversational WER |
 | Mic | Capture it, second transcriber, label lines `Me` / `Them` | Your side of the call, with no diarization |
 | Model | Sonnet 5.5 default, Opus 5.5 toggle | Latency matters mid-call |
@@ -164,20 +164,21 @@ reason the indicator is one: a UI crash must never cost a recording).
 
 ## Distribution
 
-Developed here, run on the work laptop (Teams, Xcode CLT and Homebrew available).
+Developed here, run on the work laptop.
 
-- `npx adamjhc/meetey install` / `update` build from source on the laptop, as
-  upstream does, but always from the **latest tagged release**
-  (`cli/release.js`).
+- `npx adamjhc/meetey install` / `update` always run the **latest tagged
+  release** (`cli/release.js`) and download its **Developer ID-signed,
+  notarized Meetey.app** (2.2.2+, `cli/app-bundle.js`, `docs/signing.md`), so
+  the mic grant survives updates and the laptop needs no Xcode tools. They fall
+  back to building from source, signed ad hoc.
 - Releases: `npm version x.y.z && git push --follow-tags`; CI
   (`.github/workflows/ci.yml`, `macos-26`) runs the selftests and the packaged
-  artifact check, then publishes the GitHub Release.
+  artifact check, signs and notarizes the app, then publishes the GitHub Release.
 - The fork is public (GitHub forks of public repos cannot be private), so
   nothing work-specific is committed — glossary, MCP config and pinned
   context live under `~/.meetey/` on the laptop.
-- Watch for: macOS permissions resetting after an update because the binary is
-  re-signed ad hoc. `verify` already catches it; if it is a nuisance, sign with
-  a stable local identity instead.
+- Permissions resetting on update: solved by the Developer ID signature
+  (confirmed on the laptop: no mic prompt after updating).
 
 ## Preflight (2.3.0)
 
@@ -202,3 +203,32 @@ tool answered in 5.3s, Opus in 2.0s.
   VAD-cut chunks with a vocabulary `--prompt`.
 - `claude -p` cold start and per-turn latency; measure in Phase 3.
 - Subscription usage limits over long calls; keep images opt-in.
+
+## Remaining
+
+Not built:
+
+- **Read-only Jira / log-platform tools for the assistant.** The highest-value
+  next step for production support: query the real logs rather than read them
+  off screenshots. Needs a local, uncommitted config under `~/.meetey/` and an
+  explicit allowlist of read-only tool names. Meeting content is untrusted, so
+  nothing that writes or acts.
+- **Configurable model names**, in case an organisation restricts models. The
+  aliases `sonnet` / `opus` are hard-coded; `preflight` confirmed both work on
+  the work account.
+- `get_live_context` MCP tool: not needed by the panel, which keeps the
+  conversation and can Read the live files from its working directory. Only
+  useful for asking from an ordinary Claude Code session mid-meeting.
+- Speech model download during `install`. Today it happens on first use, and
+  `preflight` checks it.
+
+Needs a real call:
+
+- Live transcript accuracy on jargon against the Whisper transcript of the same
+  meeting; latency; echo on speakers; live screen text.
+- The panel: opens on recording start, takes typing without taking focus from
+  Teams, **invisible in screen shares**, streaming, Opus switch, *Extract logs* on a
+  real shared log.
+- The watcher's repeat prompt after a decline: unexplained, no log. Possibly two
+  watchers before 2.1.4's label migration.
+
