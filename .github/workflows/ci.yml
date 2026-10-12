@@ -9,6 +9,10 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  # Dry run of the signing pipeline: builds, signs, notarizes and uploads the
+  # app as a workflow artifact, but publishes no release.
+  #   gh workflow run ci.yml --repo adamjhc/meetey --ref live-assistant
+  workflow_dispatch:
 
 jobs:
   check:
@@ -77,7 +81,7 @@ jobs:
   # install then builds from source, signed ad hoc.
   app:
     needs: check
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: macos-26
     outputs:
       signed: ${{ steps.secrets.outputs.available }}
