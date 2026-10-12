@@ -29,6 +29,15 @@ jobs:
             exit 1
           fi
 
+      # `npm version` only bumps package.json; the MCP server reports its own.
+      - name: Version numbers agree
+        run: |
+          root=$(node -p 'require("./package.json").version')
+          server=$(node -p 'require("./mcp-server/package.json").version')
+          constant=$(sed -n 's/^const SERVER_VERSION = "\(.*\)";$/\1/p' mcp-server/index.js)
+          echo "package.json=$root mcp-server/package.json=$server SERVER_VERSION=$constant"
+          [ "$root" = "$server" ] && [ "$root" = "$constant" ] || { echo "::error::Version numbers disagree"; exit 1; }
+
       - name: Build meetey-capture
         working-directory: meetey-capture
         run: swift build -c release

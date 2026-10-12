@@ -235,7 +235,11 @@ hidden, which defeats an indicator whose job is to be seen. So since 2.1.2 the
 binary runs from **`~/.meetey/Meetey.app`** (`com.adamjhcox.meetey`, `LSUIElement`,
 template in `meetey-capture/Info.plist`), assembled and signed by
 `buildCaptureApp()` in `cli/commands/install.js`. `BINARY_PATH` is the copy
-inside the bundle; `BUILT_BINARY` is the build output and is never run. Both
+inside the bundle; `BUILT_BINARY` is the build output, **deleted** once copied.
+Every launcher must point at the bundle: the watcher's plist sets
+`MEETEY_BINARY`, and the fallbacks in `daemon/watch.js` and
+`mcp-server/index.js` resolve to `../Meetey.app/…`. In 2.1.2–2.1.4 the watcher
+fell back to the build output, so its icons still had no identity. Both
 indicators set an `autosaveName` (`com.adamjhcox.meetey.recording` /
 `.watching`) so they are told apart, and assert `isVisible = true` at start
 because named items persist visibility — the watcher's hides itself during a

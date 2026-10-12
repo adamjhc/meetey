@@ -135,7 +135,7 @@ const escapeXml = (s) =>
   s.replace(/[<>&'"]/g, (c) =>
     ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
 
-function plistBody({ nodePath, scriptPath, logPath }) {
+function plistBody({ nodePath, scriptPath, logPath, captureBinary }) {
   // A LaunchAgent, not a LaunchDaemon: `display dialog` needs the user's GUI
   // session, and this must never run for a user who is not logged in.
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -147,7 +147,14 @@ function plistBody({ nodePath, scriptPath, logPath }) {
   <array>
     <string>${escapeXml(nodePath)}</string>
     <string>${escapeXml(scriptPath)}</string>
-  </array>
+  </array>${captureBinary ? `
+  <!-- Which meetey-capture to run. Without it the agent falls back to a path
+       derived from its own location, which once pointed at the bare build
+       output instead of Meetey.app. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MEETEY_BINARY</key><string>${escapeXml(captureBinary)}</string>
+  </dict>` : ""}
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <!-- Without this a crash-looping agent restarts every 10s and fills the log. -->
@@ -257,6 +264,7 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary }) {
       nodePath,
       scriptPath: paths.scriptPath,
       logPath: paths.logPath,
+      captureBinary,
     }));
 
     // Replace any previous version rather than stacking two agents.

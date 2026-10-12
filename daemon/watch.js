@@ -50,7 +50,7 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
-  resolve(scriptDir, "../meetey-capture/.build/release/meetey-capture");
+  resolve(scriptDir, "../Meetey.app/Contents/MacOS/meetey-capture");
 
 const POLL_MS = Number(process.env.MEETEY_WATCH_POLL_MS ?? 10_000);
 /** How long a dialog waits before giving up, so an away-from-desk user isn't
@@ -472,7 +472,7 @@ async function tick() {
     if (mode) {
       startRecording(meeting, mode);
     } else {
-      log(`skipped — ${meeting.title}`);
+      log(`skipped — ${meeting.title} [window ${meeting.windowID}]`);
     }
   } finally {
     prompting = false;

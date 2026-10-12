@@ -149,6 +149,11 @@ export function buildCaptureApp() {
   rmSync(APP_BUNDLE, { recursive: true, force: true });
   mkdirSync(dirname(BINARY_PATH), { recursive: true });
   cpSync(BUILT_BINARY, BINARY_PATH);
+  // Only the copy inside the bundle may run. Left in place, the build output
+  // is a working binary at an old, well-known path — the watcher ran it for
+  // two releases, so its icons had no app identity. Removing it makes anything
+  // still pointing there fail loudly instead.
+  rmSync(BUILT_BINARY);
   const plist = readFileSync(join(CAPTURE_DIR, "Info.plist"), "utf8").replaceAll("__VERSION__", version);
   writeFileSync(join(APP_BUNDLE, "Contents", "Info.plist"), plist);
   green(`Assembled: ${APP_BUNDLE}`);
