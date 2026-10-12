@@ -31,14 +31,26 @@ export function which(bin) {
   try { return execSync(`which ${bin}`, { encoding: "utf8" }).trim(); } catch { return null; }
 }
 
+/**
+ * Downloads `url` to `dest`, following redirects.
+ *
+ * `agent: false` and draining every response we don't read both matter: an
+ * unread redirect response, or a connection pooled for reuse, holds the socket
+ * open until the server times it out — which kept `update` sitting at its
+ * "Meetey updated" message for 30 seconds before returning to the prompt.
+ */
 export function downloadFile(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("Too many redirects"));
-    get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        return downloadFile(res.headers.location, dest, redirects + 1).then(resolve, reject);
+    get(url, { agent: false }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        return downloadFile(new URL(res.headers.location, url).href, dest, redirects + 1).then(resolve, reject);
       }
-      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
       const file = createWriteStream(dest);
       let received = 0;
       res.on("data", (chunk) => {
