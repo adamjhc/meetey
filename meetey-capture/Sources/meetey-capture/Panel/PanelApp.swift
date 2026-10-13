@@ -73,8 +73,10 @@ final class PanelModel: ObservableObject {
         self.chatLog = liveDir.appendingPathComponent("chat.md")
 
         if let claudePath {
-            session = ClaudeSession(claudePath: claudePath, workingDirectory: liveDir,
-                                    readableDirectories: [framesDir].compactMap { $0 }, model: model) { [weak self] event in
+            let config = AssistantConfig.load()
+            session = ClaudeSession(claudePath: claudePath, workingDirectory: config.workingDirectory,
+                                    readableDirectories: [liveDir.path, framesDir].compactMap { $0 } + config.additionalDirectories,
+                                    tools: config.tools, model: model) { [weak self] event in
                 Task { @MainActor in self?.handle(event) }
             }
         } else {
@@ -145,7 +147,7 @@ final class PanelModel: ObservableObject {
             messages[i].text += text
         case .reading(let tool):
             guard let i = answerIndex else { return }
-            messages[i].detail = tool == "Read" ? "Looking at the screen…" : "Using \(tool)…"
+            messages[i].detail = Self.describe(tool)
             if !messages[i].text.isEmpty { messages[i].text += "\n\n" }
         case .finished(let isError, let text):
             if let i = answerIndex {
@@ -164,6 +166,20 @@ final class PanelModel: ObservableObject {
             answerIndex = nil
             busy = false
             messages.append(ChatMessage(role: .status, text: "Claude stopped: \(why). Your next question starts it again."))
+        }
+    }
+
+    /// What the panel says while Claude uses a tool.
+    static func describe(_ tool: String) -> String {
+        switch tool {
+        case "Read": return "Reading…"
+        case "Grep", "Glob": return "Searching the code…"
+        case "Bash": return "Running a command…"
+        default:
+            // mcp__<server>__<tool>
+            let parts = tool.components(separatedBy: "__")
+            if parts.count >= 3, parts[0] == "mcp" { return "Using \(parts[1].replacingOccurrences(of: "_", with: " "))…" }
+            return "Using \(tool)…"
         }
     }
 
@@ -560,8 +576,11 @@ func panelAsk(questions: [String], liveDir: String, framesDir: String?, model: S
     let started = ((try? FileManager.default.attributesOfItem(atPath: liveDir)[.creationDate]) as? Date) ?? Date()
 
     var finished: CheckedContinuation<Bool, Never>?
-    let session = ClaudeSession(claudePath: claudePath, workingDirectory: dir,
-                                readableDirectories: [framesDir].compactMap { $0 }, model: model) { event in
+    let config = AssistantConfig.load()
+    print("[working in \(config.workingDirectory.path) with \(config.tools.joined(separator: ", "))]")
+    let session = ClaudeSession(claudePath: claudePath, workingDirectory: config.workingDirectory,
+                                readableDirectories: [dir.path, framesDir].compactMap { $0 } + config.additionalDirectories,
+                                tools: config.tools, model: model) { event in
         switch event {
         case .ready(let model): print("[\(model)]")
         case .delta(let text): print(text, terminator: ""); fflush(stdout)

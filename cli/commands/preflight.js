@@ -35,6 +35,7 @@ import { randomBytes } from "crypto";
 import { green, yellow, red, step, which } from "../utils.js";
 import { APP_BUNDLE, BINARY_PATH } from "../paths.js";
 import { signatureInfo } from "../app-bundle.js";
+import { assistantConfig } from "./assistant.js";
 
 const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 
@@ -75,9 +76,12 @@ export async function preflight() {
     green(`  ✓ Claude Code  ${version}`);
     reportManagedSettings();
 
-    // The panel's configuration: Sonnet, the Read tool only. Reading a file
-    // proves tools are not blocked by policy; the token proves the answer came
-    // from the file rather than a guess.
+    // The panel's configuration: Sonnet, run in the assistant's code folder
+    // with its tools and the user's MCP servers. Reading a file in an added
+    // directory, as the panel reads keyframes, proves tools aren't blocked by
+    // policy; the token proves the answer came from the file, not a guess.
+    const config = assistantConfig();
+    green(`  ✓ Assistant folder  ${config.workingDirectory}`);
     const dir = mkdtempSync(join(tmpdir(), "meetey-preflight-"));
     const token = randomBytes(6).toString("hex");
     const file = join(dir, "token.txt");
@@ -85,11 +89,14 @@ export async function preflight() {
     try {
       const sonnet = await roundTrip(claude, {
         model: "sonnet",
-        tools: "Read",
+        tools: config.tools.join(","),
+        allowedTools: "Read Grep Glob",
+        addDirs: [dir],
         prompt: `Use the Read tool to read ${file} and reply with only its contents.`,
-        cwd: dir,
+        cwd: config.workingDirectory,
       });
-      report("Sonnet + Read tool", sonnet, (text) => text.includes(token), problems, true);
+      report("Sonnet + tools", sonnet, (text) => text.includes(token), problems, true);
+      reportMcpServers(sonnet);
 
       const opus = await roundTrip(claude, { model: "opus", tools: "", prompt: "Reply with exactly: OK", cwd: dir });
       report("Opus", opus, (text) => /\bOK\b/.test(text), problems, false);
@@ -139,7 +146,7 @@ function reportManagedSettings() {
  * Claude. Resolves with timings, the init event's account/model details, and
  * the result.
  */
-function roundTrip(claude, { model, tools, prompt, cwd }) {
+function roundTrip(claude, { model, tools, prompt, cwd, allowedTools = tools, addDirs = [] }) {
   return new Promise((resolve) => {
     const started = Date.now();
     const args = [
@@ -149,7 +156,8 @@ function roundTrip(claude, { model, tools, prompt, cwd }) {
       "--verbose",
       "--model", model,
       "--tools", tools,
-      ...(tools ? ["--allowedTools", tools] : []),
+      ...(allowedTools ? ["--allowedTools", allowedTools] : []),
+      ...addDirs.flatMap((d) => ["--add-dir", d]),
     ];
     const child = spawn(claude, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
     const out = { initMs: null, totalMs: null, init: null, result: null, error: null };
@@ -190,6 +198,23 @@ function roundTrip(claude, { model, tools, prompt, cwd }) {
 
     child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
   });
+}
+
+/**
+ * The MCP servers the assistant will have — the user's own Claude Code setup.
+ * claude.ai connectors connect in the background and often show as pending on a
+ * first message; in the panel's long-lived session they're ready by the next.
+ */
+function reportMcpServers(run) {
+  const servers = run.init?.mcp_servers ?? [];
+  if (!run.init) return;
+  if (servers.length === 0) {
+    console.log("  – MCP servers  none configured in Claude Code");
+    return;
+  }
+  const failed = servers.filter((s) => s.status === "failed");
+  const line = servers.map((s) => `${s.name} (${s.status})`).join(", ");
+  (failed.length ? yellow : green)(`  ${failed.length ? "!" : "✓"} MCP servers  ${line}`);
 }
 
 function report(label, run, ok, problems, required) {

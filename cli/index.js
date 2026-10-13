@@ -31,6 +31,7 @@ Commands:
             your microphone, and Claude Code headless on this account
   live      Show the running meeting's transcript and screen text as it happens
   assistant Open the in-call assistant panel for the running (or latest) meeting
+            (--folder <path> sets the code folder Claude works in; --config shows it)
   watch     Watch for meetings and offer to record them
             (enable | disable | status | logs)
 
@@ -65,7 +66,7 @@ switch (command) {
   }
   case "assistant": {
     const { assistant } = await import("./commands/assistant.js");
-    process.exit((await assistant(args[0])) ? 0 : 1);
+    process.exit((await assistant(args[0], args.slice(1))) ? 0 : 1);
   }
   case "live": {
     const { live } = await import("./commands/live.js");

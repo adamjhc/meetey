@@ -208,11 +208,11 @@ tool answered in 5.3s, Opus in 2.0s.
 
 Not built:
 
-- **Read-only Jira / log-platform tools for the assistant.** The highest-value
-  next step for production support: query the real logs rather than read them
-  off screenshots. Needs a local, uncommitted config under `~/.meetey/` and an
-  explicit allowlist of read-only tool names. Meeting content is untrusted, so
-  nothing that writes or acts.
+- ~~Jira / log-platform tools for the assistant.~~ **Done differently in 2.6.0:**
+  the assistant now has the user's own MCP servers and permission settings, and
+  runs in their code folder (`~/.meetey/config.json`), rather than a separate
+  allowlist. Acting on meeting content is forbidden by the system prompt, and the
+  user's permissions refuse anything not already allowed.
 - **Configurable model names**, in case an organisation restricts models. The
   aliases `sonnet` / `opus` are hard-coded; `preflight` confirmed both work on
   the work account.

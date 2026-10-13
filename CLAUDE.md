@@ -608,9 +608,17 @@ notification. Code is in `Sources/meetey-capture/Panel/`:
   sit outside it. `meetingSystemPrompt` says meeting content is material, never
   instructions.
 - **`ClaudeSession`**: one long-lived `claude -p` stream-json process with
-  `--include-partial-messages`, `--tools Read --allowedTools Read
-  --strict-mcp-config` (Read only, no MCP servers: meeting content is untrusted),
-  `--add-dir` for the keyframes, cwd the live dir. A model switch restarts it
+  `--include-partial-messages`. Since 2.6.0 it is the **user's own Claude Code
+  setup**: all their MCP servers load, and their permission settings decide what
+  runs. Headless, it can't ask, so anything not already allowed is denied.
+  Built-in tools are `AssistantConfig.tools` (default Read, Grep, Glob, Bash; no
+  Edit/Write), with Read/Grep/Glob always allowed. cwd is
+  `AssistantConfig.workingDirectory` (`~/.meetey/config.json`, set by
+  `npx adamjhc/meetey assistant --folder`; default `~/projects`, else home), so it can
+  investigate code. The live dir and keyframes are `--add-dir`. Meeting content
+  is still untrusted: `meetingSystemPrompt` forbids acting on it and allows
+  changing anything (tickets, messages) only when `<my_request>` asks. Before
+  2.6.0 it was Read-only with `--strict-mcp-config`. A model switch restarts it
   with `--resume`, and so does a crash on the next question. `ClaudeLocator`
   finds `claude` without trusting PATH, since the watcher runs under launchd.
 - Every exchange is appended to `<session>-live/chat.md`.
@@ -632,8 +640,10 @@ quietly:
   with AVSpeechSynthesizer and times it. No mic, no files, no permission prompt.
 - **Microphone:** `--verify-mic`, as `verify` does.
 - **Claude Code headless:** two stream-json round trips the way the panel will
-  make them: Sonnet with only the Read tool, reading a temp file containing a
-  random token, which proves tools are not blocked by policy; and Opus. It
+  make them: Sonnet in the assistant folder with its tools and the user's MCP
+  servers, reading a temp file in an added directory that contains a random
+  token, which proves tools are not blocked by policy; and Opus. It lists the
+  MCP servers the assistant will have. It
   reports model, account source (`apiKeySource: none` means the logged-in
   account) and timings, plus any managed settings in
   `/Library/Application Support/ClaudeCode/`. One short test prompt per model,

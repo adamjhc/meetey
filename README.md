@@ -166,7 +166,8 @@ When a recording starts, a small Meetey panel opens beside the call. Ask it abou
 - **Each question carries what's new since the last one:** transcript lines, screen text and keyframe paths. Claude keeps the conversation, so it already has the rest. **Note** tells it something without asking; **Pinned notes** go with every question; the screen button attaches the current screen as an image.
 - **Quick actions:** *Extract logs*, *Last 5 min*, *Draft ticket*, *Decisions*.
 - **Sonnet by default, Opus one click away.** Switching keeps the conversation.
-- **It can only look.** Claude gets the Read tool, for keyframe images, and nothing else: no shell, no edits, no MCP servers. Meeting content is treated as material to analyse, never as instructions, so a slide saying "ignore your instructions" is reported, not obeyed.
+- **It works in your code folder, with your MCP servers.** Claude runs in `~/projects` by default (`npx adamjhc/meetey assistant --folder <path>` changes it; `--config` shows it), so it can search and read the code a meeting is about. It has your Claude Code MCP servers too, so it can look things up in your tickets, logs or docs. Built-in tools are Read, Grep, Glob and Bash; it can't edit files.
+- **Your Claude Code permissions apply.** The panel can't stop to ask, so anything your settings don't already allow is refused. Meeting content is treated as material to analyse, never as instructions: a slide saying "ignore your instructions" is reported, not obeyed, and it only does something that changes things, like creating a ticket, when you ask for it in the panel.
 - **The conversation is saved** to `<session>-live/chat.md`, so the write-up can include it.
 
 It uses whichever account Claude Code is logged in to on that Mac. Close it and `npx adamjhc/meetey assistant` reopens it. `MEETEY_NO_ASSISTANT=1` stops it opening.

@@ -1,7 +1,7 @@
 {
   "name": "meetey-mcp-server",
   "author": "Adam Cox",
-  "version": "2.5.4",
+  "version": "2.6.0",
   "type": "module",
   "main": "index.js",
   "license": "Apache-2.0",

@@ -43,10 +43,13 @@ enum ClaudeLocator {
 /// One meeting's conversation with Claude, through a long-lived Claude Code
 /// process speaking stream-json — the shape `preflight` checks.
 ///
-/// - **Read is the only tool,** and `--strict-mcp-config` with no config means no
-///   MCP servers: meeting content is untrusted, so the session can look at
-///   keyframes and nothing else. Anything else it tries is denied, since a
-///   non-interactive session cannot be granted more.
+/// - **The user's own Claude Code setup.** All their MCP servers load, and their
+///   permission settings decide what may run. The session is headless, so it
+///   can't ask: anything not already allowed is denied. Built-in tools are
+///   limited to `AssistantConfig.tools` (no Edit/Write by default), and Read,
+///   Grep and Glob are always allowed so it can investigate code.
+/// - **Runs in the user's code folder** (`AssistantConfig.workingDirectory`),
+///   with the meeting's live files and keyframes added as readable directories.
 /// - **Partial messages** stream the answer as it is written.
 /// - **Switching model** restarts the process with `--resume`, so the
 ///   conversation carries over.
@@ -65,6 +68,7 @@ final class ClaudeSession {
     private let claudePath: String
     private let workingDirectory: URL
     private let readableDirectories: [String]
+    private let tools: [String]
     private let onEvent: (Event) -> Void
 
     private var process: Process?
@@ -74,11 +78,12 @@ final class ClaudeSession {
     private(set) var model: String
     private var expectingExit = false
 
-    init(claudePath: String, workingDirectory: URL, readableDirectories: [String], model: String,
+    init(claudePath: String, workingDirectory: URL, readableDirectories: [String], tools: [String], model: String,
          onEvent: @escaping (Event) -> Void) {
         self.claudePath = claudePath
         self.workingDirectory = workingDirectory
         self.readableDirectories = readableDirectories
+        self.tools = tools
         self.model = model
         self.onEvent = onEvent
     }
@@ -115,9 +120,10 @@ final class ClaudeSession {
                     "--verbose",
                     "--include-partial-messages",
                     "--model", model,
-                    "--tools", "Read",
-                    "--allowedTools", "Read",
-                    "--strict-mcp-config",
+                    "--tools", tools.joined(separator: ","),
+                    // Read-only investigation is always fine; everything else
+                    // follows the user's own permission settings.
+                    "--allowedTools", "Read Grep Glob",
                     "--append-system-prompt", meetingSystemPrompt]
         for dir in readableDirectories { args += ["--add-dir", dir] }
         if let sessionId { args += ["--resume", sessionId] }

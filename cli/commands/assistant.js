@@ -23,14 +23,66 @@
  */
 
 import { spawn } from "child_process";
-import { existsSync, openSync, readdirSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { join, resolve } from "path";
 import { livePathFor } from "../../mcp-server/live.js";
 import { readActive } from "../../mcp-server/session-state.js";
 import { BINARY_PATH, MEETEY_DIR, RECORDINGS_DIR } from "../paths.js";
 import { which } from "../utils.js";
 
-export async function assistant(target) {
+const CONFIG_PATH = join(MEETEY_DIR, "config.json");
+const DEFAULT_TOOLS = ["Read", "Grep", "Glob", "Bash"];
+const expand = (p) => (p.startsWith("~") ? join(homedir(), p.slice(1)) : p);
+
+/**
+ * The assistant's settings, as the panel reads them (AssistantConfig.swift):
+ * the code folder Claude runs in, extra readable folders, and built-in tools.
+ * Local to this machine and never committed.
+ */
+export function assistantConfig() {
+  let raw = {};
+  try { raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")).assistant ?? {}; } catch {}
+  const projects = join(homedir(), "projects");
+  const configured = raw.workingDirectory ? expand(raw.workingDirectory) : null;
+  const workingDirectory = [configured, projects].find((d) => d && existsSync(d) && statSync(d).isDirectory()) ?? homedir();
+  return {
+    workingDirectory,
+    configuredDirectory: configured,
+    additionalDirectories: (raw.additionalDirectories ?? []).map(expand),
+    tools: raw.tools?.length ? raw.tools : DEFAULT_TOOLS,
+  };
+}
+
+function setFolder(folder) {
+  const path = resolve(expand(folder));
+  if (!existsSync(path) || !statSync(path).isDirectory()) {
+    console.log(`${path} isn't a folder.`);
+    return false;
+  }
+  let config = {};
+  try { config = JSON.parse(readFileSync(CONFIG_PATH, "utf8")); } catch {}
+  config.assistant = { ...(config.assistant ?? {}), workingDirectory: path };
+  mkdirSync(MEETEY_DIR, { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+  console.log(`The assistant now works in ${path}. Panels opened from now on use it.`);
+  return true;
+}
+
+export async function assistant(target, rest = []) {
+  // `assistant --folder <path>` sets where Claude runs; `assistant --config` shows it.
+  if (target === "--folder") {
+    if (!rest[0]) { console.log("Usage: npx adamjhc/meetey assistant --folder <path>"); return false; }
+    return setFolder(rest[0]);
+  }
+  if (target === "--config") {
+    const c = assistantConfig();
+    console.log(`Folder: ${c.workingDirectory}${c.configuredDirectory && c.configuredDirectory !== c.workingDirectory ? `  (configured ${c.configuredDirectory} doesn't exist)` : ""}`);
+    if (c.additionalDirectories.length) console.log(`Also readable: ${c.additionalDirectories.join(", ")}`);
+    console.log(`Built-in tools: ${c.tools.join(", ")}, plus your Claude Code MCP servers. Your permission settings decide what may run.`);
+    return true;
+  }
+
   if (!existsSync(BINARY_PATH)) {
     console.log("Meetey isn't installed. Run: npx adamjhc/meetey install");
     return false;
