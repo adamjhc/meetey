@@ -393,6 +393,10 @@ function startRecording(window, mode) {
     // needs a visible indicator and a way to stop it without hunting for a
     // terminal.
     "--menu-bar", "--label", (window.title ?? "Meeting").slice(0, 60),
+    // Which window is the meeting, so its closing tells the capture the call is
+    // over — the difference between stopping in seconds and waiting minutes.
+    "--meeting-window", String(window.windowID),
+    "--meeting-title", window.title ?? "",
   ];
 
   if (framesDir) {

@@ -77,6 +77,11 @@ struct Args {
     let claudePath: String?
     let panelAsk: [String]
     let model: String
+    /// The meeting's window, so its closing can confirm the call is over.
+    let meetingWindow: UInt32?
+    let meetingTitle: String
+    let quickEndGrace: TimeInterval
+    let fallbackEndGrace: TimeInterval
 
     static func parse() -> Args {
         var bundleID = ""
@@ -100,7 +105,7 @@ struct Args {
         var autoStop = false
         var autoStopGrace: TimeInterval = 30
         var stopWhenCallEnds = false
-        var callEndGrace: TimeInterval = 600
+        var callEndGrace: TimeInterval = 60
         var menuBar = false
         var label = ""
         var watchIndicator = false
@@ -125,6 +130,10 @@ struct Args {
         var claudePath: String? = nil
         var panelAsk: [String] = []
         var model = "sonnet"
+        var meetingWindow: UInt32? = nil
+        var meetingTitle = ""
+        var quickEndGrace: TimeInterval = 15
+        var fallbackEndGrace: TimeInterval = 600
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -150,7 +159,7 @@ struct Args {
             case "--auto-stop":       autoStop = true
             case "--auto-stop-grace": autoStopGrace = TimeInterval(it.next() ?? "") ?? 30
             case "--stop-when-call-ends": stopWhenCallEnds = true
-            case "--call-end-grace":  callEndGrace = TimeInterval(it.next() ?? "") ?? 600
+            case "--call-end-grace":  callEndGrace = TimeInterval(it.next() ?? "") ?? 60
             case "--menu-bar":        menuBar = true
             case "--label":           label = it.next() ?? ""
             case "--watch-indicator": watchIndicator = true
@@ -175,6 +184,10 @@ struct Args {
             case "--claude":          claudePath = it.next()
             case "--panel-ask":       if let q = it.next() { panelAsk.append(q) }
             case "--model":           model = it.next() ?? "sonnet"
+            case "--meeting-window":  meetingWindow = UInt32(it.next() ?? "")
+            case "--meeting-title":   meetingTitle = it.next() ?? ""
+            case "--quick-end-grace": quickEndGrace = TimeInterval(it.next() ?? "") ?? 15
+            case "--fallback-end-grace": fallbackEndGrace = TimeInterval(it.next() ?? "") ?? 600
             default: break
             }
         }
@@ -194,7 +207,9 @@ struct Args {
                     replayMicPath: replayMicPath, replayFramesDir: replayFramesDir,
                     replaySpeed: replaySpeed, assistant: assistant, panel: panel, title: title,
                     startedAtMs: startedAtMs, capturePid: capturePid, claudePath: claudePath,
-                    panelAsk: panelAsk, model: model)
+                    panelAsk: panelAsk, model: model, meetingWindow: meetingWindow,
+                    meetingTitle: meetingTitle, quickEndGrace: quickEndGrace,
+                    fallbackEndGrace: fallbackEndGrace)
     }
 }
 
@@ -1424,7 +1439,10 @@ enum Microphone {
 ///
 /// Because waiting costs nothing, the grace can be long enough to be sure.
 struct MeetingEndMonitor {
+    /// The wait when the caller doesn't say. The caller picks it per poll by how
+    /// good its evidence is (see the call-end poll in `record`).
     let grace: TimeInterval
+    private var activeGrace: TimeInterval
     /// Set once the mic has been seen in use. Until then this stays silent: a
     /// recording where no app ever took the mic is not a call whose end we can
     /// detect, and firing on that would kill legitimate recordings that simply
@@ -1432,7 +1450,10 @@ struct MeetingEndMonitor {
     private var armed = false
     private var candidate: (since: Date, mark: UInt32)?
 
-    init(grace: TimeInterval) { self.grace = grace }
+    init(grace: TimeInterval) {
+        self.grace = grace
+        self.activeGrace = grace
+    }
 
     var isArmed: Bool { armed }
     var hasCandidate: Bool { candidate != nil }
@@ -1441,7 +1462,7 @@ struct MeetingEndMonitor {
     /// Drives the "ending soon" readout in the menu bar.
     func remaining(at now: Date) -> TimeInterval? {
         guard let candidate else { return nil }
-        return max(0, grace - now.timeIntervalSince(candidate.since))
+        return max(0, activeGrace - now.timeIntervalSince(candidate.since))
     }
 
     /// Drops the pending candidate and restarts the clock, without disarming.
@@ -1457,7 +1478,9 @@ struct MeetingEndMonitor {
     /// `mark` is how far the recording had got at this poll — the point to cut
     /// back to if the call really did end here. Returns that point once the call
     /// is confirmed over, nil otherwise.
-    mutating func update(micInUse: Bool, mark: UInt32, at now: Date) -> UInt32? {
+    /// `wait` is how long the mic must stay released before committing, chosen
+    /// by the caller from how strong its evidence is; nil uses `grace`.
+    mutating func update(micInUse: Bool, mark: UInt32, at now: Date, wait: TimeInterval? = nil) -> UInt32? {
         if micInUse {
             armed = true
             candidate = nil
@@ -1467,8 +1490,31 @@ struct MeetingEndMonitor {
 
         let current = candidate ?? (since: now, mark: mark)
         candidate = current
-        guard now.timeIntervalSince(current.since) >= grace else { return nil }
+        activeGrace = wait ?? grace
+        guard now.timeIntervalSince(current.since) >= activeGrace else { return nil }
         return current.mark
+    }
+}
+
+// MARK: - Meeting window
+
+/// Whether the meeting's window is still open.
+///
+/// CoreGraphics window *metadata* from the window server — not ScreenCaptureKit,
+/// so it opens no capture connection and is safe while recording (see "Nothing
+/// queries the capture subsystem" in CLAUDE.md). The window counts as open if
+/// its number still exists, or another window of the app carries the meeting's
+/// title, since Teams can replace the window it started in. Titles need Screen
+/// Recording permission, which the capture process has. Nil when unknowable.
+enum MeetingWindow {
+    static func isOpen(windowID: UInt32?, title: String, pid: pid_t) -> Bool? {
+        guard windowID != nil || !title.isEmpty,
+              let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        for window in list where (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid {
+            if let windowID, (window[kCGWindowNumber as String] as? Int).map(UInt32.init) == windowID { return true }
+            if !title.isEmpty, (window[kCGWindowName as String] as? String) == title { return true }
+        }
+        return false
     }
 }
 
@@ -1877,6 +1923,23 @@ func selfTest() throws {
         failures.append("callend: cut back to \(cut.map(String.init) ?? "nil"), expected the mark from when the mic went quiet (320000)")
     }
 
+    // The app let go of the mic *and* the meeting window closed: a minute, not
+    // ten, so the next call isn't joined on — still cut back to the release.
+    // A short wait, chosen by the caller when its evidence is strong, still
+    // cuts back to the moment the mic was released.
+    var quick = MeetingEndMonitor(grace: 600)
+    _ = quick.update(micInUse: true, mark: 100, at: at(0))
+    _ = quick.update(micInUse: false, mark: 320_000, at: at(100), wait: 15)
+    if quick.update(micInUse: false, mark: 400_000, at: at(110), wait: 15) != nil {
+        failures.append("callend: committed before a 15s wait")
+    }
+    if quick.update(micInUse: false, mark: 480_000, at: at(116), wait: 15) != 320_000 {
+        failures.append("callend: a 15s wait did not commit, cut back to the release point")
+    }
+    if quick.remaining(at: at(116)) != 0 {
+        failures.append("callend: 'ending soon' countdown doesn't follow the chosen wait")
+    }
+
     // The dangerous case. The mic drops briefly while the meeting is still
     // going; nothing may be lost, and the clock must start over afterwards.
     var blipped = MeetingEndMonitor(grace: 600)
@@ -2057,6 +2120,23 @@ func selfTest() throws {
         failures.append("mic: trim left \(trimmedSize) bytes, expected \(Int(WAVWriter.headerBytes) + 20_000)")
     }
     print("  mic: timeline padding and trim-to-call OK")
+
+    // The meeting-window check reads window-server metadata, never
+    // ScreenCaptureKit. A real window is found by number; a made-up one isn't.
+    if let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]],
+       let any = list.first(where: { $0[kCGWindowOwnerPID as String] != nil && $0[kCGWindowNumber as String] != nil }),
+       let pid = (any[kCGWindowOwnerPID as String] as? Int).map(pid_t.init),
+       let number = (any[kCGWindowNumber as String] as? Int).map(UInt32.init) {
+        if MeetingWindow.isOpen(windowID: number, title: "", pid: pid) != true {
+            failures.append("window: an existing window was reported closed")
+        }
+        if MeetingWindow.isOpen(windowID: UInt32.max - 1, title: "", pid: pid) != false {
+            failures.append("window: a window that doesn't exist was reported open")
+        }
+        print("  window: meeting-window check finds open windows and misses closed ones")
+    } else {
+        print("  window: no windows to check against here — skipped")
+    }
 
     // Call-end detection depends on reading other processes' input state once
     // the mic is recorded. Informational: a machine with no audio devices (CI)
@@ -2582,32 +2662,66 @@ func record(args: Args) async throws {
 
     if args.stopWhenCallEnds {
         Task {
-            var monitor = MeetingEndMonitor(grace: args.callEndGrace)
+            var monitor = MeetingEndMonitor(grace: args.fallbackEndGrace)
             var everArmed = false
+            var announced = false
+            let appName = NSRunningApplication.runningApplications(withBundleIdentifier: args.bundleID)
+                .first?.localizedName ?? "The meeting app"
             while true {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
 
-                // Unable to read the device is not the same as the mic being
-                // free. Treating it as free would end a live meeting.
+                // Whether the *meeting app* still holds the mic — itself or a
+                // helper it launched. Asking "is anyone but Meetey using it"
+                // let any other app with the mic (dictation, a browser tab,
+                // system voice features) keep a finished call recording.
+                // Unable to read it is not the same as free: that would end a
+                // live meeting.
+                let app = NSRunningApplication.runningApplications(withBundleIdentifier: args.bundleID).first
                 let reading: Bool?
-                if micPid != nil, #available(macOS 14.0, *) {
+                var appSpecific = false
+                if let app, let inputs = Microphone.processesUsingInput() {
+                    reading = Microphone.appUsesInput(bundleID: args.bundleID, pid: app.processIdentifier, using: inputs)
+                    appSpecific = reading != nil
+                } else if micPid != nil, #available(macOS 14.0, *) {
                     reading = Microphone.inUse(excluding: ownPids)
                 } else {
                     reading = Microphone.inUse()
                 }
                 guard let inUse = reading else { continue }
+                let windowOpen = app.flatMap {
+                    MeetingWindow.isOpen(windowID: args.meetingWindow, title: args.meetingTitle, pid: $0.processIdentifier)
+                }
 
                 // The user saw "ending soon" and said no. Restart the clock —
                 // resetCandidate rather than a fresh monitor, so it stays armed.
                 if takeVeto() {
                     monitor.resetCandidate()
+                    announced = false
                     fputs("meetey-capture: keeping the recording — call-end clock restarted\n", stderr)
                     await MainActor.run { indicator?.setState(.recording) }
                     continue
                 }
 
                 let mark = writer.bytesWritten
-                if let cutTo = monitor.update(micInUse: inUse, mark: mark, at: Date()) {
+                // How long to wait depends on how good the evidence is. The
+                // meeting app letting go of the mic is strong; with its window
+                // gone too, stronger still. Only the generic "is any mic in
+                // use" signal gets the old long wait, since that one is wrong
+                // often enough to cost a meeting. The silence check and the trim
+                // below apply whichever wait is used.
+                let wait = windowOpen == false && appSpecific ? args.quickEndGrace
+                    : appSpecific ? args.callEndGrace
+                    : args.fallbackEndGrace
+                let cut = monitor.update(micInUse: inUse, mark: mark, at: Date(), wait: wait)
+                if monitor.hasCandidate && !announced {
+                    announced = true
+                    let wait = Int(monitor.remaining(at: Date()) ?? 0)
+                    fputs("meetey-capture: \(appName) released the microphone\(windowOpen == false ? " and the meeting window closed" : "") — the call may have ended; stopping in \(wait)s unless it comes back\n", stderr)
+                } else if !monitor.hasCandidate && announced {
+                    announced = false
+                    fputs("meetey-capture: \(appName) has the microphone again — still recording\n", stderr)
+                }
+                if let cutTo = cut {
                     // The mic says the call is over. Before acting on that, check
                     // the audio we have actually been recording — if anyone has
                     // spoken since, the meeting plainly did not end there and the
@@ -2615,6 +2729,7 @@ func record(args: Args) async throws {
                     if writer.lastAudibleOffset > cutTo {
                         fputs("meetey-capture: microphone released but audio continued — still recording\n", stderr)
                         monitor.resetCandidate()
+                        announced = false
                         await MainActor.run { indicator?.setState(.recording) }
                         continue
                     }

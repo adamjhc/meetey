@@ -323,10 +323,29 @@ safe because of how it commits.
 **It never stops anything early.** When the microphone is released it records a
 *candidate* end — the time, and the byte offset the recording had reached — and
 keeps recording. If the mic comes back the candidate is discarded and nothing was
-lost. Only after `--call-end-grace` (default 600s) does it commit, and the WAV is
-then truncated back to the candidate offset so the waiting never reaches the
-transcript. Separating *when to stop* from *where the recording ends* is what
-makes a long grace period free, which in turn is what makes the evidence good.
+lost. Only after the wait does it commit, and the WAV is then truncated back to
+the candidate offset so the waiting never reaches the transcript. Separating
+*when to stop* from *where the recording ends* is what makes waiting free.
+
+**How long it waits depends on the evidence** (since 2.5.3). Upstream waited a
+fixed ten minutes because "some process released the mic" was its only signal,
+and that joined back-to-back calls into one recording. The poll now asks whether
+**the meeting app itself** holds the mic (`Microphone.appUsesInput`: the app, its
+bundle-prefixed helpers, or processes it launched), so another app holding the mic
+(dictation, a browser tab) can no longer keep a finished call recording. It also
+checks whether **the meeting window** (`--meeting-window`/`--meeting-title`,
+passed by the watcher and by `start_recording` with a `windowID`) still exists, via
+CoreGraphics window metadata (`MeetingWindow.isOpen`), which is the window server,
+**not** ScreenCaptureKit, so it is safe during a capture:
+
+| Evidence | Wait |
+|---|---|
+| App released the mic **and** the meeting window is gone | `--quick-end-grace`, 15s |
+| App released the mic | `--call-end-grace`, 60s |
+| Only the device-level "any mic in use" signal | `--fallback-end-grace`, 600s |
+
+Each candidate is logged ("Microsoft Teams released the microphone … stopping in
+15s unless it comes back"), so the watch log shows what call-end detection saw.
 
 Three guards, each covering a different way the naive version goes wrong:
 
@@ -378,10 +397,12 @@ without it their half of every meeting was missing. Code is in
   permission prompt, a headset swap — so sample N in both files is the same
   moment. On stop the parent truncates the mic file to the call file's length,
   so a call-end trim applies to both.
-- **Call-end detection excludes Meetey's own processes.** With the mic recorded
-  the input device is always running, so `Microphone.inUse()` would never see the
-  call end. `inUse(excluding:)` asks each Core Audio process object instead
-  (macOS 14+); on macOS 13 the mic is not recorded at all.
+- **Call-end detection asks about the meeting app.** With the mic recorded the
+  input device is always running, so `Microphone.inUse()` would never see the call
+  end. The poll asks whether the meeting app itself holds the mic
+  (`appUsesInput`), falling back to `inUse(excluding:)` (any process but Meetey's)
+  when that can't be read. Both need macOS 14; on macOS 13 the mic is not recorded
+  at all.
 - **Pause, because meeting-app mute does not apply.** The indicator's "Pause My
   Microphone" sends SIGUSR1/SIGUSR2; the helper writes silence while paused, and
   the bar reads "mic off".

@@ -44,7 +44,7 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 // Reported as this server's identity to Claude Code, and compared against the
 // latest release. One constant so the two can never disagree — keep it in step
 // with package.json and mcp-server/package.json when bumping.
-const SERVER_VERSION = "2.5.2";
+const SERVER_VERSION = "2.5.3";
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
@@ -295,6 +295,12 @@ function startRecording({
   // end is only committed after a long quiet period, and only if the audio we
   // recorded confirms nobody was still talking.
   if (stopWhenCallEnds !== false) args.push("--stop-when-call-ends");
+  // A chosen window lets the capture tell when the meeting window closes, which
+  // ends the recording within seconds of the call ending.
+  if (windowID !== undefined) {
+    args.push("--meeting-window", String(windowID));
+    if (label) args.push("--meeting-title", label);
+  }
 
   // A menu bar item with a Stop Recording command. As much a standing "this is
   // recording" indicator as a control — every other signal Meetey gives is a
@@ -914,9 +920,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "boolean",
             description:
               "End the recording when the meeting app releases the microphone, trimming it back " +
-              "to that moment (default true). Waits 10 minutes and cross-checks the recorded " +
-              "audio before acting, so a live meeting is not cut short. Has no effect on a " +
-              "recording where no app ever used the microphone.",
+              "to that moment (default true). Waits 15s if the meeting window (windowID) has " +
+              "also closed, 60s otherwise, and cross-checks the recorded audio before acting, " +
+              "so a live meeting is not cut short. Has no effect on a recording where no app " +
+              "ever used the microphone.",
           },
           autoStop: {
             type: "boolean",
