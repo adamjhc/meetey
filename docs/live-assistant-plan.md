@@ -229,6 +229,18 @@ Needs a real call:
 - The panel: opens on recording start, takes typing without taking focus from
   Teams, **invisible in screen shares**, streaming, Opus switch, *Extract logs* on a
   real shared log.
-- The watcher's repeat prompt after a decline: unexplained, no log. Possibly two
-  watchers before 2.1.4's label migration.
+- The watcher's repeat prompt after a decline: probably fixed by 2.5.1's
+  `callsHandled` (a call isn't re-offered until Teams releases the mic).
+
+Fixed since 2.5.0, awaiting confirmation on the laptop:
+
+- **2.5.1–2.5.2**: Teams meetings recognised by "not a Teams screen + Teams
+  holds the mic"; new Teams titles are the meeting name only.
+- **2.5.3**: recordings stop 15s after Teams releases the mic and the meeting
+  window closes (60s on the mic alone), instead of ten minutes. Back-to-back
+  calls were being joined.
+- **2.5.4**: the executable is named `Meetey`, so macOS and menu bar managers
+  (Thaw, Tuck) can keep the icons visible. Under `meetey-capture` they matched a
+  stale registration. If the red recording icon still won't stay pinned, the next
+  step is one persistent icon that switches between watching and recording.
 
