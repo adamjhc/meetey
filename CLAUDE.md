@@ -92,8 +92,9 @@ those patterns into silence — a missed meeting is unrecoverable, a spurious
 prompt is not. Run `node daemon/watch.js --selftest` after touching them.
 
 **Teams meetings are recognised by the mic, not just the title.** New Teams names
-a meeting window after the meeting ("TAM Onyx Stand-up | Microsoft Teams"), which
-no title pattern can tell from a popped-out chat. `teamsMeeting` therefore
+a meeting window after the meeting ("TAM Onyx Stand-up | Microsoft Teams"), with
+no "meeting" or "call" in it, so no title pattern can tell it from a popped-out
+chat. `teamsMeeting` therefore
 counts any Teams window that is not one of Teams' own screens (`TEAMS_SECTIONS`:
 Chat, Calendar, …) while **Teams is taking audio input**. `--list-windows` reports
 that per window as `appUsingMic`: the app's own pid, a process sharing its bundle

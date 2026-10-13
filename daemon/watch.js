@@ -89,17 +89,16 @@ const TEAMS_SECTIONS = new Set([
 
 /**
  * New Teams names a meeting window after the meeting — "TAM Onyx Stand-up |
- * Microsoft Teams" — so the title alone can't tell a meeting from a popped-out
- * chat with "Priya Shah | Microsoft Teams". Whether Teams is taking audio input
- * can, so a window that is not one of Teams' own screens counts as a meeting
- * while Teams holds the mic.
+ * Microsoft Teams" — with no "meeting" or "call" in it, so the title alone
+ * can't tell a meeting from a popped-out chat with "Priya Shah | Microsoft
+ * Teams". Whether Teams is taking audio input can, so a window that is not one
+ * of Teams' own screens counts as a meeting while Teams holds the mic.
  *
  * Unknown mic state (macOS 13, an unreadable Core Audio query) errs towards
  * offering, per the rule above: a missed meeting can't be recovered, a spurious
  * prompt is one click.
  */
 export function teamsMeeting(title, window = {}) {
-  if (/meeting|\bcall\b/i.test(title)) return true;
   const section = title.split("|")[0].trim().toLowerCase();
   if (!section || TEAMS_SECTIONS.has(section)) return false;
   return window.appUsingMic !== false;
@@ -591,9 +590,7 @@ function selfTest() {
     w("com.google.Chrome", "Launch review | Microsoft Teams — teams.microsoft.com"),
     w("us.zoom.xos", "Zoom Meeting"),
     w("us.zoom.xos", "Zoom Webinar"),
-    w("com.microsoft.teams", "Standup | Meeting"),
-    w("com.microsoft.teams2", "Standup | Meeting"),
-    w("com.microsoft.teams2", "Call with Priya Shah | Microsoft Teams"),
+    w("com.microsoft.teams", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true }),
     // Real new-Teams meeting windows: named after the meeting, nothing else.
     w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true }),
     w("com.microsoft.teams2", "Web Monitoring - Grafana Faro/Sentry | Microsoft Teams", { appUsingMic: true }),
@@ -619,8 +616,9 @@ function selfTest() {
     w("com.microsoft.teams2", "Chat | Priya Shah | Microsoft Teams", { appUsingMic: true }),
     w("com.microsoft.teams2", "Calendar | Calendar | Microsoft Teams", { appUsingMic: true }),
     w("com.microsoft.teams2", "Microsoft Teams", { appUsingMic: true }),
-    // A popped-out chat while Teams isn't in a call.
+    // A popped-out chat while Teams isn't in a call — even one that says "call".
     w("com.microsoft.teams2", "Priya Shah | Microsoft Teams", { appUsingMic: false }),
+    w("com.microsoft.teams2", "Call notes | Microsoft Teams", { appUsingMic: false }),
     w("com.apple.Safari", "Zoom Meeting"),       // unsupported app
     w("com.google.Chrome", "Google Meet", { isOnScreen: false }), // minimised
   ];
