@@ -1309,6 +1309,67 @@ enum Microphone {
         return running != 0
     }
 
+    /// Processes taking audio input right now: their pids and bundle IDs, or nil
+    /// when that can't be read (macOS 13, or a Core Audio error). Like the
+    /// device property above, this is process metadata, not audio, so it needs
+    /// no microphone permission.
+    static func processesUsingInput() -> (pids: Set<pid_t>, bundles: Set<String>)? {
+        guard #available(macOS 14.0, *) else { return nil }
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var listAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(system, &listAddress, 0, nil, &size) == noErr else { return nil }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &listAddress, 0, nil, &size, &objects) == noErr else { return nil }
+
+        var pids = Set<pid_t>(), bundles = Set<String>()
+        for object in objects {
+            var running = UInt32(0)
+            var runningSize = UInt32(MemoryLayout<UInt32>.size)
+            var runningAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyIsRunningInput,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(object, &runningAddress, 0, nil, &runningSize, &running) == noErr,
+                  running != 0 else { continue }
+
+            var pid = pid_t(0)
+            var pidSize = UInt32(MemoryLayout<pid_t>.size)
+            var pidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyPID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            if AudioObjectGetPropertyData(object, &pidAddress, 0, nil, &pidSize, &pid) == noErr { pids.insert(pid) }
+
+            var bundle: Unmanaged<CFString>?
+            var bundleSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+            var bundleAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyBundleID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            if AudioObjectGetPropertyData(object, &bundleAddress, 0, nil, &bundleSize, &bundle) == noErr,
+               let id = bundle?.takeRetainedValue() as String?, !id.isEmpty {
+                bundles.insert(id)
+            }
+        }
+        return (pids, bundles)
+    }
+
+    /// Whether the app `bundleID` (process `pid`) is taking audio input — itself,
+    /// a helper sharing its bundle prefix, or any process it launched. Meeting
+    /// apps built on web views often do their audio in a child process, which
+    /// is why the app's own pid is not enough. Nil when unknowable.
+    static func appUsesInput(bundleID: String, pid: pid_t,
+                             using inputs: (pids: Set<pid_t>, bundles: Set<String>)?) -> Bool? {
+        guard let inputs else { return nil }
+        if inputs.pids.contains(pid) { return true }
+        if inputs.bundles.contains(where: { $0 == bundleID || $0.hasPrefix(bundleID + ".") }) { return true }
+        return inputs.pids.contains { Responsibility.responsiblePid(for: $0) == pid }
+    }
+
     /// Whether any process *other than* `excluded` is taking audio input.
     ///
     /// Needed once Meetey records the mic itself: the device is then always
@@ -2003,6 +2064,9 @@ func selfTest() throws {
     if #available(macOS 14.0, *) {
         if let inUse = Microphone.inUse(excluding: [getpid()]) {
             print("  mic: per-process input state readable (another app using the mic: \(inUse))")
+            if let inputs = Microphone.processesUsingInput() {
+                print("  mic: \(inputs.pids.count) process(es) taking input now\(inputs.bundles.isEmpty ? "" : ": " + inputs.bundles.sorted().joined(separator: ", "))")
+            }
         } else {
             print("  mic: WARNING — per-process input state unreadable; call-end detection will not fire while the mic is recorded")
         }
@@ -2097,6 +2161,9 @@ struct WindowRecord: Codable {
     let height: Int
     let isOnScreen: Bool
     let displayID: UInt32?
+    /// Whether this window's app is taking audio input — the strongest sign a
+    /// call is actually in progress. Nil when it can't be read.
+    let appUsingMic: Bool?
 }
 
 /// Lists the capturable windows of the supported meeting apps. For Chrome the
@@ -2106,6 +2173,7 @@ struct WindowRecord: Codable {
 func listWindows(bundleID: String) async throws {
     let content = try await shareableContent()
     let wanted = bundleID.isEmpty ? supportedBundleIDs : [bundleID]
+    let inputs = Microphone.processesUsingInput()
     let windows = content.windows
         .filter { window in
             guard let app = window.owningApplication, wanted.contains(app.bundleIdentifier) else { return false }
@@ -2127,7 +2195,10 @@ func listWindows(bundleID: String) async throws {
                 width: Int(window.frame.width),
                 height: Int(window.frame.height),
                 isOnScreen: window.isOnScreen,
-                displayID: displayContaining(window, in: content)?.displayID
+                displayID: displayContaining(window, in: content)?.displayID,
+                appUsingMic: window.owningApplication.flatMap { app in
+                    Microphone.appUsesInput(bundleID: app.bundleIdentifier, pid: app.processID, using: inputs)
+                }
             )
         }
     try printJSON(windows)

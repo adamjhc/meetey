@@ -72,11 +72,38 @@ const MEETING_PATTERNS = [
   // "meeting".
   { bundleID: "com.google.Chrome", test: (t) => /google meet|meet\.google\.com|^meet\b|zoom\.us\/(j|wc)\/|teams\.microsoft\.com|whereby|meet\.jit\.si/i.test(t) },
   { bundleID: "us.zoom.xos", test: (t) => /zoom (meeting|webinar)/i.test(t) },
-  { bundleID: "com.microsoft.teams", test: (t) => /meeting|\bcall\b/i.test(t) },
-  // New Teams, which replaced classic Teams and has its own bundle ID. Same
-  // pattern until it is checked against real meeting window titles.
-  { bundleID: "com.microsoft.teams2", test: (t) => /meeting|\bcall\b/i.test(t) },
+  { bundleID: "com.microsoft.teams", test: teamsMeeting },
+  // New Teams, which replaced classic Teams and has its own bundle ID.
+  { bundleID: "com.microsoft.teams2", test: teamsMeeting },
 ];
+
+/**
+ * Teams' own screens: the main window's title starts with the section it is
+ * showing ("Chat | Priya Shah | Microsoft Teams", "Calendar | …").
+ */
+const TEAMS_SECTIONS = new Set([
+  "activity", "chat", "teams", "calendar", "calls", "files", "apps", "onedrive", "copilot",
+  "communities", "settings", "notifications", "people", "assignments", "approvals", "shifts",
+  "planner", "viva", "help", "search", "microsoft teams",
+]);
+
+/**
+ * New Teams names a meeting window after the meeting — "TAM Onyx Stand-up |
+ * Microsoft Teams" — so the title alone can't tell a meeting from a popped-out
+ * chat with "Priya Shah | Microsoft Teams". Whether Teams is taking audio input
+ * can, so a window that is not one of Teams' own screens counts as a meeting
+ * while Teams holds the mic.
+ *
+ * Unknown mic state (macOS 13, an unreadable Core Audio query) errs towards
+ * offering, per the rule above: a missed meeting can't be recovered, a spurious
+ * prompt is one click.
+ */
+export function teamsMeeting(title, window = {}) {
+  if (/meeting|\bcall\b/i.test(title)) return true;
+  const section = title.split("|")[0].trim().toLowerCase();
+  if (!section || TEAMS_SECTIONS.has(section)) return false;
+  return window.appUsingMic !== false;
+}
 
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 const healthCtx = { meeteyDir: MEETEY_DIR, home: HOME };
@@ -145,11 +172,37 @@ function listWindows() {
   }
 }
 
+/**
+ * Apps whose current call has already been offered — recorded or skipped.
+ *
+ * A meeting is keyed by window and title, and Teams changes both mid-call (a
+ * window replaced on joining, a title that changes when someone shares), so
+ * without this a declined call could be offered again. While the app keeps
+ * the mic it is the same call; once it lets go, the call is over and the next
+ * one is offered normally.
+ */
+const callsHandled = new Set();
+
+/** Forget calls whose app no longer holds the mic. */
+export function updateCallsHandled(windows) {
+  for (const bundleID of [...callsHandled]) {
+    const stillInCall = windows.some((w) => w.bundleID === bundleID && w.appUsingMic === true);
+    if (!stillInCall) callsHandled.delete(bundleID);
+  }
+}
+
+export function markCallHandled(window) {
+  if (window.appUsingMic) callsHandled.add(window.bundleID);
+}
+
 export function findMeeting(windows) {
   for (const window of windows) {
     if (!window.isOnScreen) continue;
     const pattern = MEETING_PATTERNS.find((p) => p.bundleID === window.bundleID);
-    if (pattern?.test(window.title ?? "")) return window;
+    if (!pattern?.test(window.title ?? "", window)) continue;
+    // A call already offered stays handled while it lasts (see callsHandled).
+    if (window.appUsingMic && callsHandled.has(window.bundleID)) continue;
+    return window;
   }
   return null;
 }
@@ -452,10 +505,13 @@ const LOG_UNMATCHED_FOR = new Set(["com.microsoft.teams2"]);
 function logUnmatchedTitles(windows, meeting) {
   for (const window of windows) {
     if (window === meeting || !LOG_UNMATCHED_FOR.has(window.bundleID) || !window.isOnScreen) continue;
+    // Matched but held back because its call was already offered: not news.
+    if (MEETING_PATTERNS.find((p) => p.bundleID === window.bundleID)?.test(window.title ?? "", window)) continue;
     const title = normalizeTitle(window.title);
     if (!title || unmatchedSeen.has(title)) continue;
     unmatchedSeen.add(title);
-    log(`not treated as a meeting — ${APP_NAMES[window.bundleID]}: "${title}"`);
+    const mic = window.appUsingMic === undefined || window.appUsingMic === null ? "unknown" : window.appUsingMic ? "in use" : "not in use";
+    log(`not treated as a meeting — ${APP_NAMES[window.bundleID]}: "${title}" (Teams mic: ${mic})`);
   }
 }
 
@@ -490,6 +546,7 @@ async function tick() {
 
   pausedFor = null;
   const windows = listWindows();
+  updateCallsHandled(windows);
   const meeting = findMeeting(windows);
   logUnmatchedTitles(windows, meeting);
 
@@ -508,6 +565,7 @@ async function tick() {
     // Marked before the branch: recording a window counts as handling it just as
     // much as skipping does, and forgetting that is what created the loop.
     handled.add(keyFor(meeting));
+    markCallHandled(meeting);
     saveHandled();
     if (mode) {
       startRecording(meeting, mode);
@@ -536,6 +594,11 @@ function selfTest() {
     w("com.microsoft.teams", "Standup | Meeting"),
     w("com.microsoft.teams2", "Standup | Meeting"),
     w("com.microsoft.teams2", "Call with Priya Shah | Microsoft Teams"),
+    // Real new-Teams meeting windows: named after the meeting, nothing else.
+    w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true }),
+    w("com.microsoft.teams2", "Web Monitoring - Grafana Faro/Sentry | Microsoft Teams", { appUsingMic: true }),
+    // Mic state unknown: offered, since missing a meeting is the worse mistake.
+    w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams"),
   ];
   const instant = [
     // An instant meeting can be titled just "Meet" — no dash to match on.
@@ -552,6 +615,12 @@ function selfTest() {
     w("com.google.Chrome", "meetey/README.md at main"),
     w("us.zoom.xos", "Zoom"),                    // the idle app window, not a call
     w("com.microsoft.teams2", "Calls | Microsoft Teams"), // the Calls tab, not a call
+    // Teams' own screens, even mid-call.
+    w("com.microsoft.teams2", "Chat | Priya Shah | Microsoft Teams", { appUsingMic: true }),
+    w("com.microsoft.teams2", "Calendar | Calendar | Microsoft Teams", { appUsingMic: true }),
+    w("com.microsoft.teams2", "Microsoft Teams", { appUsingMic: true }),
+    // A popped-out chat while Teams isn't in a call.
+    w("com.microsoft.teams2", "Priya Shah | Microsoft Teams", { appUsingMic: false }),
     w("com.apple.Safari", "Zoom Meeting"),       // unsupported app
     w("com.google.Chrome", "Google Meet", { isOnScreen: false }), // minimised
   ];
@@ -563,6 +632,15 @@ function selfTest() {
   for (const window of shouldNotMatch) {
     if (findMeeting([window])) failures.push(`false positive: ${window.bundleID} "${window.title}"`);
   }
+  // A handled call is not offered again while Teams keeps the mic — even under
+  // a new window or title — and the next call is offered once it lets go.
+  const inCall = w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true, windowID: 7 });
+  markCallHandled(inCall);
+  const renamed = w("com.microsoft.teams2", "TAM Onyx Stand-up (sharing) | Microsoft Teams", { appUsingMic: true, windowID: 8 });
+  if (findMeeting([renamed])) failures.push("call: re-offered a call already handled");
+  updateCallsHandled([w("com.microsoft.teams2", "Chat | Microsoft Teams", { appUsingMic: false })]);
+  if (!findMeeting([renamed])) failures.push("call: next call not offered after the mic was released");
+
   // The first on-screen match wins, so an unrelated window must not shadow one.
   const mixed = [w("com.google.Chrome", "Inbox (48) - Gmail"), w("us.zoom.xos", "Zoom Meeting")];
   if (findMeeting(mixed)?.bundleID !== "us.zoom.xos") {

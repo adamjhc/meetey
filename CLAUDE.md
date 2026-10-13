@@ -91,6 +91,17 @@ dismissed dialog, so `MEETING_PATTERNS` is deliberately generous. Do not "tighte
 those patterns into silence — a missed meeting is unrecoverable, a spurious
 prompt is not. Run `node daemon/watch.js --selftest` after touching them.
 
+**Teams meetings are recognised by the mic, not just the title.** New Teams names
+a meeting window after the meeting ("TAM Onyx Stand-up | Microsoft Teams"), which
+no title pattern can tell from a popped-out chat. `teamsMeeting` therefore
+counts any Teams window that is not one of Teams' own screens (`TEAMS_SECTIONS`:
+Chat, Calendar, …) while **Teams is taking audio input**. `--list-windows` reports
+that per window as `appUsingMic`: the app's own pid, a process sharing its bundle
+prefix, or any process it is responsible for, since web-view apps do audio in
+helpers. Unknown mic state errs towards offering. `callsHandled` then keeps a
+call that was offered (recorded or skipped) from being offered again under a new
+window or title until Teams lets go of the mic.
+
 The prompt offers three choices — `Skip` / `Audio + screen` / `Audio only` — and
 screen capture is **scoped to the window the watcher detected**, which is narrower
 than `/meetey start`'s default. Consent stays per-recording: the agent proposes,
