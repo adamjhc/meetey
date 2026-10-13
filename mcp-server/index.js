@@ -44,11 +44,13 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 // Reported as this server's identity to Claude Code, and compared against the
 // latest release. One constant so the two can never disagree — keep it in step
 // with package.json and mcp-server/package.json when bumping.
-const SERVER_VERSION = "2.5.3";
+const SERVER_VERSION = "2.5.4";
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
-  resolve(scriptDir, "../Meetey.app/Contents/MacOS/meetey-capture");
+  // Keep in step with APP_EXECUTABLE in cli/app-bundle.js, which this
+  // installed copy can't import.
+  resolve(scriptDir, "../Meetey.app/Contents/MacOS/Meetey");
 
 // Admin surface only — these are inspected, never written, by this server.
 const CLAUDE_JSON = join(HOME, ".claude.json");

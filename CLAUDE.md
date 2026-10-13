@@ -246,14 +246,19 @@ keep it shown or remember its place: it vanished whenever other icons were
 hidden, which defeats an indicator whose job is to be seen. So since 2.1.2 the
 binary runs from **`~/.meetey/Meetey.app`** (`com.adamjhcox.meetey`, `LSUIElement`,
 template in `meetey-capture/Info.plist`), put there by `installCaptureApp()` in
-`cli/commands/install.js` — see "Signed releases" below. `BINARY_PATH` is the copy
+`cli/commands/install.js` — see "Signed releases" below. The executable inside is
+**`Meetey`** (`APP_EXECUTABLE`), not `meetey-capture`: macOS also keys menu bar items
+by process name, and under the old name the icons matched a stale registration the
+bare binary left behind (System Settings listed "meetey-capture", no position was
+ever saved, managers couldn't keep the icon visible). The icons' autosave names
+changed in the same release for the same reason. `BINARY_PATH` is the copy
 inside the bundle; `BUILT_BINARY` is the build output, **deleted** once copied.
 Every launcher must point at the bundle: the watcher's plist sets
 `MEETEY_BINARY`, and the fallbacks in `daemon/watch.js` and
 `mcp-server/index.js` resolve to `../Meetey.app/…`. In 2.1.2–2.1.4 the watcher
 fell back to the build output, so its icons still had no identity. Both
-indicators set an `autosaveName` (`com.adamjhcox.meetey.recording` /
-`.watching`) so they are told apart, and assert `isVisible = true` at start
+indicators set an `autosaveName` (`com.adamjhcox.meetey.status.recording` /
+`.status.watching`) so they are told apart, and assert `isVisible = true` at start
 because named items persist visibility — the watcher's hides itself during a
 recording and must not come back hidden. (Notification *action
 buttons* are the thing that genuinely requires bundling — see the watch agent,

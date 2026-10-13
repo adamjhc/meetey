@@ -937,7 +937,7 @@ final class RecordingIndicator: NSObject {
         // from the watcher's — both belong to com.adamjhcox.meetey — and remember
         // where the user put it. Named items also persist their visibility, so
         // it is asserted rather than inherited from a previous run.
-        item.autosaveName = "com.adamjhcox.meetey.recording"
+        item.autosaveName = "com.adamjhcox.meetey.status.recording"
         item.isVisible = true
 
         item.button?.imagePosition = .imageLeading
@@ -1168,7 +1168,7 @@ final class WatcherIndicator: NSObject {
         // See RecordingIndicator. Asserting visibility matters more here: this
         // item hides itself while a recording runs, and a named item would
         // otherwise come back hidden if the process ended mid-recording.
-        item.autosaveName = "com.adamjhcox.meetey.watching"
+        item.autosaveName = "com.adamjhcox.meetey.status.watching"
         item.isVisible = true
 
         item.button?.image = NSImage(systemSymbolName: "circle.dotted",

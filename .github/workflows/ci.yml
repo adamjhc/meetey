@@ -158,7 +158,7 @@ jobs:
       # system refuses to launch must never be published.
       - name: Signed app runs
         if: steps.secrets.outputs.available == 'true'
-        run: dist/Meetey.app/Contents/MacOS/meetey-capture --selftest
+        run: dist/Meetey.app/Contents/MacOS/Meetey --selftest
 
       - name: Notarize and staple
         if: steps.secrets.outputs.available == 'true'

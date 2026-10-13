@@ -38,6 +38,16 @@ import { downloadFile } from "./utils.js";
 export const APP_ID = "com.adamjhcox.meetey";
 
 /**
+ * The executable inside Meetey.app. Named like the app, as normal apps are:
+ * macOS also identifies menu bar items by process name, and while it was
+ * `meetey-capture` the icons matched a stale, identity-less registration left
+ * by the bare binary, so System Settings listed "meetey-capture" and menu bar
+ * managers couldn't keep the icon visible. The Swift target is still
+ * `meetey-capture`; only the copy in the bundle is renamed.
+ */
+export const APP_EXECUTABLE = "Meetey";
+
+/**
  * The Apple Developer Team whose signature a downloaded Meetey.app must carry
  * (Adam Cox). Checked before anything downloaded replaces the installed app;
  * null would mean no signed release is trusted, so install builds from source.
@@ -50,7 +60,7 @@ export const appAssetName = (version) => `Meetey-${version}.zip`;
 /** Puts a built meetey-capture binary into a fresh Meetey.app at `appBundle`. */
 export function assembleApp({ builtBinary, appBundle, plistTemplate, version }) {
   rmSync(appBundle, { recursive: true, force: true });
-  const binary = join(appBundle, "Contents", "MacOS", "meetey-capture");
+  const binary = join(appBundle, "Contents", "MacOS", APP_EXECUTABLE);
   mkdirSync(dirname(binary), { recursive: true });
   cpSync(builtBinary, binary);
   const plist = readFileSync(plistTemplate, "utf8").replaceAll("__VERSION__", version);

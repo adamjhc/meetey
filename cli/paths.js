@@ -20,6 +20,7 @@ import { fileURLToPath } from "url";
 // One definition, shared with the MCP server, so the CLI and the server can
 // never disagree about the agent's label.
 import { WATCH_LABEL } from "../mcp-server/watch-agent.js";
+import { APP_EXECUTABLE } from "./app-bundle.js";
 
 export const HOME      = homedir();
 export const PKG_DIR   = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -36,7 +37,7 @@ export const BUILT_BINARY   = join(CAPTURE_DIR, ".build", "release", "meetey-cap
 /** The binary lives inside an app bundle so its menu bar items have an app
  *  identity; without one, macOS and menu bar managers will not keep them shown. */
 export const APP_BUNDLE     = join(MEETEY_DIR, "Meetey.app");
-export const BINARY_PATH    = join(APP_BUNDLE, "Contents", "MacOS", "meetey-capture");
+export const BINARY_PATH    = join(APP_BUNDLE, "Contents", "MacOS", APP_EXECUTABLE);
 export const MODEL_PATH     = join(MODELS_DIR, "ggml-base.en.bin");
 export const SKILL_PATH     = join(HOME, ".claude", "skills", "meetey", "SKILL.md");
 export const CLAUDE_JSON    = join(HOME, ".claude.json");

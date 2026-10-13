@@ -17,13 +17,14 @@
 import { existsSync, cpSync } from "fs";
 import { join } from "path";
 import { green, yellow, red, step, run } from "../utils.js";
-import { PKG_DIR, BINARY_PATH, BUILT_BINARY, SERVER_DIR, DAEMON_DIR, SKILL_PATH, MEETEY_DIR, HOME } from "../paths.js";
+import { PKG_DIR, APP_BUNDLE, BINARY_PATH, BUILT_BINARY, SERVER_DIR, DAEMON_DIR, SKILL_PATH, MEETEY_DIR, HOME } from "../paths.js";
 import { installCaptureApp, registerMcpServer, installSkill, registerKeybindings } from "./install.js";
 
 export async function update() {
   // --- Verify installed ---
-  // Before 2.1.2 the binary ran from the build directory, not Meetey.app.
-  if (!existsSync(BINARY_PATH) && !existsSync(BUILT_BINARY)) {
+  // Any earlier layout counts as installed: before 2.1.2 the binary ran from the
+  // build directory, and before 2.5.4 the one in Meetey.app was `meetey-capture`.
+  if (!existsSync(APP_BUNDLE) && !existsSync(BUILT_BINARY)) {
     red("meetey-capture binary not found. Run: npx adamjhc/meetey install");
     process.exit(1);
   }
