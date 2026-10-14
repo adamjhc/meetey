@@ -1,6 +1,6 @@
 {
   "name": "meetey",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "Local-first meeting capture and transcription for Claude Code",
   "type": "module",
   "author": "Adam Cox",
