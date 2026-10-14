@@ -44,7 +44,7 @@ const MODEL_PATH = process.env.MEETEY_MODEL ?? join(MEETEY_DIR, "models", "ggml-
 // Reported as this server's identity to Claude Code, and compared against the
 // latest release. One constant so the two can never disagree — keep it in step
 // with package.json and mcp-server/package.json when bumping.
-const SERVER_VERSION = "2.6.0";
+const SERVER_VERSION = "2.6.1";
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
@@ -922,7 +922,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "boolean",
             description:
               "End the recording when the meeting app releases the microphone, trimming it back " +
-              "to that moment (default true). Waits 15s if the meeting window (windowID) has " +
+              "to that moment (default true). Waits 5s if the meeting window (windowID) has " +
               "also closed, 60s otherwise, and cross-checks the recorded audio before acting, " +
               "so a live meeting is not cut short. Has no effect on a recording where no app " +
               "ever used the microphone.",

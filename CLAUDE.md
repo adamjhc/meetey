@@ -251,7 +251,11 @@ template in `meetey-capture/Info.plist`), put there by `installCaptureApp()` in
 by process name, and under the old name the icons matched a stale registration the
 bare binary left behind (System Settings listed "meetey-capture", no position was
 ever saved, managers couldn't keep the icon visible). The icons' autosave names
-changed in the same release for the same reason. `BINARY_PATH` is the copy
+changed in the same release for the same reason. **Every install re-registers the
+bundle with LaunchServices** (`registerWithLaunchServices`, `lsregister -f`):
+LaunchServices caches the Info.plist and kept the old executable name after the
+bundle was replaced in place, so 2.5.4's icon was a blank slot that ignored clicks
+until the record was refreshed. `BINARY_PATH` is the copy
 inside the bundle; `BUILT_BINARY` is the build output, **deleted** once copied.
 Every launcher must point at the bundle: the watcher's plist sets
 `MEETEY_BINARY`, and the fallbacks in `daemon/watch.js` and
@@ -345,12 +349,13 @@ CoreGraphics window metadata (`MeetingWindow.isOpen`), which is the window serve
 
 | Evidence | Wait |
 |---|---|
-| App released the mic **and** the meeting window is gone | `--quick-end-grace`, 15s |
+| App released the mic **and** the meeting window is gone | `--quick-end-grace`, 5s |
 | App released the mic | `--call-end-grace`, 60s |
 | Only the device-level "any mic in use" signal | `--fallback-end-grace`, 600s |
 
-Each candidate is logged ("Microsoft Teams released the microphone … stopping in
-15s unless it comes back"), so the watch log shows what call-end detection saw.
+The poll runs every 2s. Each candidate is logged ("Microsoft Teams released the
+microphone … stopping in 5s unless it comes back"), so the watch log shows what
+call-end detection saw.
 
 Three guards, each covering a different way the naive version goes wrong:
 

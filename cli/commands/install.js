@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, cpSync, writeFileSync, readFileSync, unlinkSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { green, yellow, red, step, run, which, downloadFile } from "../utils.js";
-import { assembleApp, installSignedApp, signApp } from "../app-bundle.js";
+import { assembleApp, installSignedApp, registerWithLaunchServices, signApp } from "../app-bundle.js";
 import {
   PKG_DIR, MEETEY_DIR, MODELS_DIR, RECORDINGS_DIR,
   SERVER_DIR, DAEMON_DIR, CAPTURE_DIR, BINARY_PATH, BUILT_BINARY, APP_BUNDLE, MODEL_PATH, MODEL_URL,
@@ -150,6 +150,7 @@ export async function installCaptureApp() {
     const result = await installSignedApp({ version, appBundle: APP_BUNDLE, workDir: MEETEY_DIR });
     if (result.installed) {
       green(`Installed: ${APP_BUNDLE} (signed by team ${result.teamId})`);
+      registered();
       return;
     }
     yellow(`No signed app to install — ${result.reason}. Building from source instead.`);
@@ -177,6 +178,15 @@ export async function installCaptureApp() {
   step("Code-signing Meetey.app (ad hoc)");
   signApp({ appBundle: APP_BUNDLE, entitlements: join(CAPTURE_DIR, "entitlements.plist") });
   green(`Signed: ${APP_BUNDLE}`);
+  registered();
+}
+
+/** Re-registers the new bundle, so macOS knows its current executable. */
+function registered() {
+  if (!registerWithLaunchServices(APP_BUNDLE)) {
+    yellow("Couldn't re-register Meetey.app with LaunchServices — if its menu bar icon is blank, run:\n" +
+      `  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f ${APP_BUNDLE}`);
+  }
 }
 
 export function registerMcpServer() {

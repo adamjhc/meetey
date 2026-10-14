@@ -54,6 +54,28 @@ export const APP_EXECUTABLE = "Meetey";
  */
 export const TEAM_ID = "86CB3GP2UH";
 
+const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+/**
+ * Makes LaunchServices re-read the bundle at `appBundle`.
+ *
+ * LaunchServices caches each bundle's Info.plist — executable name included —
+ * and doesn't refresh it when the bundle is replaced in place. Meetey is never
+ * opened through Finder, so after 2.5.4 renamed the executable the record still
+ * said `meetey-capture`, and macOS couldn't tie the running `Meetey` to the app:
+ * its menu bar icon became a blank slot that did nothing when clicked. Every
+ * install of the bundle therefore re-registers it. A failure here is reported,
+ * never fatal.
+ */
+export function registerWithLaunchServices(appBundle) {
+  try {
+    execFileSync(LSREGISTER, ["-f", appBundle], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Release asset name for a version. */
 export const appAssetName = (version) => `Meetey-${version}.zip`;
 

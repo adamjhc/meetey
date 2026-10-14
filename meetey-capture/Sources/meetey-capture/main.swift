@@ -132,7 +132,7 @@ struct Args {
         var model = "sonnet"
         var meetingWindow: UInt32? = nil
         var meetingTitle = ""
-        var quickEndGrace: TimeInterval = 15
+        var quickEndGrace: TimeInterval = 5
         var fallbackEndGrace: TimeInterval = 600
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
@@ -186,7 +186,7 @@ struct Args {
             case "--model":           model = it.next() ?? "sonnet"
             case "--meeting-window":  meetingWindow = UInt32(it.next() ?? "")
             case "--meeting-title":   meetingTitle = it.next() ?? ""
-            case "--quick-end-grace": quickEndGrace = TimeInterval(it.next() ?? "") ?? 15
+            case "--quick-end-grace": quickEndGrace = TimeInterval(it.next() ?? "") ?? 5
             case "--fallback-end-grace": fallbackEndGrace = TimeInterval(it.next() ?? "") ?? 600
             default: break
             }
@@ -2668,7 +2668,10 @@ func record(args: Args) async throws {
             let appName = NSRunningApplication.runningApplications(withBundleIdentifier: args.bundleID)
                 .first?.localizedName ?? "The meeting app"
             while true {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                // Every 2s, so a call that's clearly over ends within a few
+                // seconds. Each check is a Core Audio and a window-server query,
+                // both cheap.
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
 
                 // Whether the *meeting app* still holds the mic — itself or a
                 // helper it launched. Asking "is anyone but Meetey using it"
