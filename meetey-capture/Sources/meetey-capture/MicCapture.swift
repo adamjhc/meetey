@@ -230,6 +230,21 @@ final class MicRecorder {
 /// file, SIGUSR1 pauses and SIGUSR2 resumes. It also finishes if its parent
 /// disappears, since nothing else would ever stop it.
 func recordMic(outputPath: String, epoch: Date, liveDir: String? = nil) async -> Never {
+    // Until the file exists there is nothing to save, so a stop just ends the
+    // process — and the parent is watched from the start. Waiting on the
+    // permission prompt used to happen before either: a check that gave up left
+    // this helper behind, parentless, holding its parent's output open (which
+    // hung `install`) until the prompt was answered.
+    let parent = getppid()
+    signal(SIGTERM, SIG_DFL)
+    signal(SIGINT, SIG_DFL)
+    Task.detached {
+        while true {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if getppid() != parent { exit(0) }
+        }
+    }
+
     let granted: Bool
     switch AVCaptureDevice.authorizationStatus(for: .audio) {
     case .authorized: granted = true
@@ -254,7 +269,6 @@ func recordMic(outputPath: String, epoch: Date, liveDir: String? = nil) async ->
     }
     fputs("meetey-capture: microphone recording started\n", stderr)
 
-    let parent = getppid()
     // A signal and the orphan check can both ask; the file is finished once.
     let finishing = NSLock()
     var finished = false
@@ -354,8 +368,18 @@ func verifyMic() async -> Never {
         try? await Task.sleep(nanoseconds: 200_000_000)
     }
 
+    // Never leave the helper behind: if it doesn't finish promptly (it may still
+    // be waiting on the permission prompt), stop it outright.
     kill(pid, SIGTERM)
-    waitpid(pid, &status, 0)
+    var ended = false
+    for _ in 0..<30 where !ended {
+        ended = waitpid(pid, &status, WNOHANG) == pid
+        if !ended { try? await Task.sleep(nanoseconds: 100_000_000) }
+    }
+    if !ended {
+        kill(pid, SIGKILL)
+        waitpid(pid, &status, 0)
+    }
     guard recordingSince != nil else {
         finish(1, "  ✗ Microphone  nothing was recorded within 90s")
     }
