@@ -38,8 +38,7 @@ export async function update() {
   run("npm install --silent", { cwd: SERVER_DIR });
   green("MCP server updated");
 
-  // The watch agent ships alongside but stays dormant: nothing runs it until
-  // `meetey watch enable`, and that opt-in is the whole consent story.
+  // The watch agent: Meetey's menu bar icon. Started further down.
   //
   // Guarded because a half-applied update is worse than a missing optional
   // component: this runs after the MCP server has already been replaced, so
@@ -47,7 +46,7 @@ export async function update() {
   step("Installing the watch agent");
   if (existsSync(join(PKG_DIR, "daemon"))) {
     cpSync(join(PKG_DIR, "daemon"), DAEMON_DIR, { recursive: true, force: true });
-    green(`Watch agent installed to ${DAEMON_DIR} (off until: npx adamjhc/meetey watch enable)`);
+    green(`Watch agent installed to ${DAEMON_DIR}`);
   } else {
     yellow("Watch agent not present in this package — skipping (the watcher will be unavailable)");
   }
@@ -67,30 +66,34 @@ export async function update() {
   registerKeybindings();
   green("Shortcuts updated (they work while Claude Code is focused)");
 
-  // Restart the watch agent so it runs the code just installed.
+  // Turn the agent on, or restart it on the code just installed.
   //
-  // launchd keeps running whatever it loaded at boot, so replacing the files on
-  // disk changes nothing until the agent restarts. An update that fixes the
-  // agent therefore does not fix anything — the old code keeps running, and the
-  // user reasonably believes they are on the new version. This is how a
+  // On by default since 2.7.1: it never records without a click, so there is
+  // nothing to opt into — unless the user turned it off with `watch disable`.
+  //
+  // Restarting matters too: launchd keeps running whatever it loaded, so
+  // replacing the files on disk changes nothing until the agent restarts. An
+  // update that fixes the agent otherwise fixes nothing, while the user
+  // reasonably believes they are on the new version. This is how a
   // recording-killing bug survived being fixed.
-  const { watchStatus, enableWatch, removeLegacyWatch } = await import("../../mcp-server/watch-agent.js");
+  const { watchTurnedOff, enableWatch, removeLegacyWatch } = await import("../../mcp-server/watch-agent.js");
   const watchCtx = { meeteyDir: MEETEY_DIR, home: HOME };
-  // Before 2.1.4 the agent was com.meetey.watch. Moving it to the new label
-  // counts as "enabled", or the rename would quietly switch the watcher off.
-  const hadLegacyWatch = removeLegacyWatch(watchCtx);
-  if (hadLegacyWatch || watchStatus(watchCtx).enabled) {
-    step("Restarting the watch agent on the new code");
-    const restarted = enableWatch({
-      ...watchCtx,
-      nodePath: process.execPath,
-      captureBinary: BINARY_PATH,
-    });
-    if (restarted.error) {
-      yellow(`Could not restart the watcher: ${restarted.error}`);
-      if (restarted.fix) console.log(`  ${restarted.fix}`);
+  removeLegacyWatch(watchCtx);
+  if (existsSync(join(DAEMON_DIR, "watch.js"))) {
+    if (watchTurnedOff(watchCtx)) {
+      console.log("  Menu bar icon left off (you turned it off). On again: npx adamjhc/meetey watch enable");
     } else {
-      green("Watcher restarted");
+      step("Starting Meetey in the menu bar");
+      const result = enableWatch({ ...watchCtx, nodePath: process.execPath, captureBinary: BINARY_PATH, strict: false });
+      if (result.error) {
+        yellow(`Could not start the menu bar icon: ${result.error}`);
+        if (result.fix) console.log(`  ${result.fix}`);
+      } else if (result.warning) {
+        yellow(result.warning);
+        console.log(`  ${result.fix}`);
+      } else {
+        green("Meetey is in the menu bar — click its icon in a call to record");
+      }
     }
   }
 

@@ -21,7 +21,7 @@ import { assembleApp, installSignedApp, registerWithLaunchServices, signApp } fr
 import {
   PKG_DIR, MEETEY_DIR, MODELS_DIR, RECORDINGS_DIR,
   SERVER_DIR, DAEMON_DIR, CAPTURE_DIR, BINARY_PATH, BUILT_BINARY, APP_BUNDLE, MODEL_PATH, MODEL_URL,
-  SKILL_PATH, CLAUDE_JSON, KEYBINDINGS,
+  SKILL_PATH, CLAUDE_JSON, KEYBINDINGS, HOME,
 } from "../paths.js";
 
 export async function install() {
@@ -82,8 +82,7 @@ export async function install() {
   run("npm install --silent", { cwd: SERVER_DIR });
   green(`MCP server installed to ${SERVER_DIR}`);
 
-  // The watch agent ships alongside but stays dormant: nothing runs it until
-  // `meetey watch enable`, and that opt-in is the whole consent story.
+  // The watch agent: Meetey's menu bar icon. Started further down.
   //
   // Guarded because a half-applied update is worse than a missing optional
   // component: this runs after the MCP server has already been replaced, so
@@ -91,7 +90,7 @@ export async function install() {
   step("Installing the watch agent");
   if (existsSync(join(PKG_DIR, "daemon"))) {
     cpSync(join(PKG_DIR, "daemon"), DAEMON_DIR, { recursive: true, force: true });
-    green(`Watch agent installed to ${DAEMON_DIR} (off until: npx adamjhc/meetey watch enable)`);
+    green(`Watch agent installed to ${DAEMON_DIR}`);
   } else {
     yellow("Watch agent not present in this package — skipping (the watcher will be unavailable)");
   }
@@ -110,6 +109,26 @@ export async function install() {
   step("Registering Claude Code shortcuts");
   registerKeybindings();
   green("Shortcuts registered (they work while Claude Code is focused)");
+
+  // --- Menu bar icon ---
+  // On by default: it never records without a click. `watch disable` turns it
+  // off for good; install respects that too.
+  const { watchTurnedOff, enableWatch, removeLegacyWatch } = await import("../../mcp-server/watch-agent.js");
+  const watchCtx = { meeteyDir: MEETEY_DIR, home: HOME };
+  removeLegacyWatch(watchCtx);
+  if (existsSync(join(DAEMON_DIR, "watch.js")) && !watchTurnedOff(watchCtx)) {
+    step("Starting Meetey in the menu bar");
+    const result = enableWatch({ ...watchCtx, nodePath: process.execPath, captureBinary: BINARY_PATH, strict: false });
+    if (result.error) {
+      yellow(`Could not start the menu bar icon: ${result.error}`);
+      if (result.fix) console.log(`  ${result.fix}`);
+    } else if (result.warning) {
+      yellow(result.warning);
+      console.log(`  ${result.fix}`);
+    } else {
+      green("Meetey is in the menu bar — click its icon in a call to record");
+    }
+  }
 
   // --- Done ---
   printPermissionReminder();

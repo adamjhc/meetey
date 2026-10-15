@@ -47,7 +47,19 @@ export function watchPaths({ meeteyDir, home }) {
     logPath: join(meeteyDir, "logs", "watch.log"),
     logsDir: join(meeteyDir, "logs"),
     healthPath: join(meeteyDir, "state", "watch-health.json"),
+    offPath: join(meeteyDir, "state", "watch-off"),
   };
+}
+
+/**
+ * Whether the user turned the agent off with `watch disable`. Since 2.7.1 it is
+ * on by default — install and update enable it, because it never records
+ * without a click — so turning it off has to be remembered, or the next update
+ * would switch it straight back on. Quitting from the menu is not this: that
+ * lasts until the next login, like any menu bar app.
+ */
+export function watchTurnedOff({ meeteyDir, home }) {
+  return existsSync(watchPaths({ meeteyDir, home }).offPath);
 }
 
 /**
@@ -281,7 +293,7 @@ export function watchMessage({ available, installed, running, canSeeWindows }) {
       "it starts can't capture anything. Allow node in System Settings → Privacy & Security → Screen Recording.";
   }
   if (installed && running) return "Meetey's menu bar icon is running. It records only when you click it.";
-  if (installed) return "Meetey's menu bar icon is installed but not running — enable it again to restart it.";
+  if (installed) return "Meetey's menu bar icon was quit — it comes back at login, or now with: npx adamjhc/meetey watch enable";
   return "Meetey's menu bar icon is off.";
 }
 
@@ -290,7 +302,13 @@ export function watchMessage({ available, installed, running, canSeeWindows }) {
  * stdout; the MCP server must pass stderr, because its stdout *is* the
  * protocol and a stray line there corrupts the reply.
  */
-export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progressStream = process.stdout }) {
+/**
+ * `strict`: tear the agent back down when it lacks Screen Recording. Install
+ * and update pass false — the icon is useful without it (it still shows calls
+ * and recordings), and the user only has to grant the permission rather than
+ * enable it again afterwards.
+ */
+export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progressStream = process.stdout, strict = true }) {
   const paths = watchPaths({ meeteyDir, home });
 
   if (!existsSync(paths.scriptPath)) {
@@ -303,6 +321,7 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progress
   try {
     // Stale health from a previous run would be mistaken for this one's verdict.
     clearHealth({ meeteyDir, home });
+    try { unlinkSync(paths.offPath); } catch { /* wasn't turned off */ }
     mkdirSync(paths.logsDir, { recursive: true });
     mkdirSync(dirname(paths.plistPath), { recursive: true });
     writeFileSync(paths.plistPath, plistBody({
@@ -335,6 +354,17 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progress
   );
   spinner.done();
   const health = readHealth({ meeteyDir, home });
+
+  if (reported && !health?.canSeeWindows && !strict) {
+    return {
+      enabled: true,
+      permissionNeeded: true,
+      plistPath: paths.plistPath,
+      logPath: paths.logPath,
+      warning: "Meetey is in the menu bar, but node has no Screen Recording permission, so recording from it won't capture anything yet.",
+      fix: "System Settings → Privacy & Security → Screen Recording → enable node. Then quit Meetey from its menu and run `npx adamjhc/meetey watch enable`.",
+    };
+  }
 
   if (!reported || !health?.canSeeWindows) {
     // Leave nothing behind that looks enabled but cannot work.
@@ -371,6 +401,8 @@ export function disableWatch({ meeteyDir, home }) {
     removeLegacyWatch({ home });
     bootout();
     if (existsSync(paths.plistPath)) unlinkSync(paths.plistPath);
+    mkdirSync(dirname(paths.offPath), { recursive: true });
+    writeFileSync(paths.offPath, `turned off ${new Date().toISOString()}\n`);
   } catch (e) {
     return { error: `Could not stop the watcher: ${e.message.split("\n")[0]}` };
   }
@@ -378,7 +410,7 @@ export function disableWatch({ meeteyDir, home }) {
     enabled: false,
     // Stopping the watcher is not stopping a recording. Conflating the two would
     // have someone turn this off mid-meeting and assume their capture ended.
-    message: "Meetey's menu bar icon is off. A recording it started is stopped and saved first — turning it off tears down everything it started, so it is finished properly rather than abandoned.",
+    message: "Meetey's menu bar icon is off, and stays off through updates until `npx adamjhc/meetey watch enable`. A recording it started is stopped and saved first — turning it off tears down everything it started, so it is finished properly rather than abandoned.",
   };
 }
 

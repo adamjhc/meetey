@@ -35,8 +35,8 @@ export function watch(sub) {
       console.log(`
 Usage: npx adamjhc/meetey watch <enable|disable|status|log>
 
-  enable    Put Meetey's icon in the menu bar, starting at login
-  disable   Remove it
+  enable    Put Meetey's icon in the menu bar, starting at login (the default)
+  disable   Remove it, and keep it off through updates
   status    Is it running?
   log       Show recent activity (alias: logs)
 

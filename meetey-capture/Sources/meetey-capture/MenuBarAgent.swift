@@ -354,8 +354,11 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
                 menu.addItem(parent)
             }
         }
-        menu.addItem(.separator())
-        action("Turn Off Meetey", #selector(turnOff))
+        // Not while recording: quitting stops the agent, and the recording with it.
+        if case .recording = state {} else {
+            menu.addItem(.separator())
+            action("Quit Meetey", #selector(quit))
+        }
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -427,13 +430,14 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
                                   startedAt: r.startedAt, capturePid: r.pid)
     }
 
-    /// Unloads the agent and removes its plist, so it doesn't return at login.
-    /// The label is the plist's name, so it can't drift from the installed one.
-    @objc private func turnOff() {
+    /// Unloads the agent until the next login, like quitting any menu bar app.
+    /// The plist stays, so it returns at login; `watch disable` is the way to
+    /// turn it off for good. The label is the plist's name, so it can't drift
+    /// from the installed one.
+    @objc private func quit() {
         let uid = String(getuid())
         let label = plistPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
             ?? "com.adamjhcox.meetey.watch"
-        if let plistPath { try? FileManager.default.removeItem(atPath: plistPath) }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["bootout", "gui/\(uid)/\(label)"]

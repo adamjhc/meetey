@@ -868,16 +868,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "watcher_status",
       description:
-        "Is Meetey's menu bar icon (the watch agent) on? An optional login agent whose icon turns " +
-        "orange while Chrome, Zoom or Teams is in a call; clicking it records. Off by default.",
+        "Is Meetey's menu bar icon (the watch agent) on? A login agent whose icon turns orange " +
+        "while Chrome, Zoom or Teams is in a call; clicking it records. On by default.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "enable_watcher",
       description:
-        "Turn Meetey's menu bar icon (the watch agent) on. It installs a login agent that persists " +
-        "across restarts until disabled, so only call this when the user has actually asked for it — " +
-        "never to be helpful after a missed recording. It records only when the user clicks the icon.",
+        "Turn Meetey's menu bar icon (the watch agent) on, or back on after `disable_watcher` or " +
+        "Quit. It is on by default; if the user turned it off, only call this when they ask. " +
+        "It records only when the user clicks the icon.",
       inputSchema: { type: "object", properties: {} },
     },
     {

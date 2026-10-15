@@ -33,7 +33,7 @@ Commands:
   assistant Open the in-call assistant panel for the running (or latest) meeting
             (--folder <path> sets the code folder Claude works in, --model <name>
             the model it uses; --config shows both)
-  watch     Meetey's menu bar icon: it turns orange in a call, click it to record
+  watch     Meetey's menu bar icon, on by default: orange in a call, click to record
             (enable | disable | status | logs)
 
 Examples:

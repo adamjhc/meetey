@@ -33,7 +33,7 @@ Meetey — local meeting capture
   /meetey stop     Stop recording and transcribe
   /meetey status   Check if a recording is active
 
-  /meetey watch    Ask to record meetings automatically (off by default)
+  /meetey watch    Meetey's menu bar icon: click it in a call to record
   /meetey writeup  Write notes for meetings recorded while you were away
 
   /meetey list     Browse past meetings
@@ -310,9 +310,9 @@ assistant in its menu.
 - `/meetey watch log` → `watcher_log`. Use this when clicking the icon didn't record.
   Check `watcher_status`'s `canSeeWindows` first, though.
 
-**Only enable it when asked.** It installs a login agent that persists across restarts,
-so it is not something to switch on helpfully because a user just missed a recording —
-offer it, and let them answer. Turning it *off* on request needs no such hesitation.
+**It is on by default** (install and update turn it on), and it never records without a
+click. If the user turned it off with `/meetey watch off`, don't switch it back on
+unasked — offer it.
 
 **How a recording ends.** It stops when the app quits, or when the call itself ends —
 detected by the meeting app releasing the microphone, then confirmed for a few seconds
@@ -340,10 +340,10 @@ a silent or empty recording rather than an error, so it is the likeliest cause o
 "meetey recorded nothing" complaint.
 
 If asked about recording meetings automatically, describe what actually exists: an
-optional menu bar icon (`/meetey watch on`, or `npx adamjhc/meetey watch enable` in a
-terminal — there is no bare `meetey` command on PATH) that turns orange while Chrome,
-Zoom or Teams is in a call; one click records audio and screen. It is off until enabled
-and never records on its own. A recording ends when the call ends or the app quits, and the
+menu bar icon, on by default (`/meetey watch on` restores it if it was turned off, or
+`npx adamjhc/meetey watch enable` in a terminal — there is no bare `meetey` command on
+PATH), that turns orange while Chrome, Zoom or Teams is in a call; one click records
+audio and screen. It never records on its own. A recording ends when the call ends or the app quits, and the
 transcript is written automatically; `/meetey writeup` adds the notes for anything
 recorded while the user was away.
 

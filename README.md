@@ -40,7 +40,7 @@ After installation, open System Settings → Privacy & Security → Screen Recor
 /meetey stop     Stop recording, transcribe, and save notes
 /meetey status   Check whether a recording is active
 
-/meetey watch    Menu bar icon: click to record a call (off by default)
+/meetey watch    Menu bar icon: click it in a call to record (on by default)
 /meetey writeup  Write notes for meetings recorded while you were away
 
 /meetey list     Browse past meetings
@@ -245,10 +245,10 @@ Tuning, if you need it (pass through to `meetey-capture`):
 
 ## Recording from the menu bar
 
-Meetey can keep one icon in the menu bar that knows when you're in a call, so starting a recording is one click rather than a trip to Claude Code.
+Meetey keeps one icon in the menu bar that knows when you're in a call, so starting a recording is one click rather than a trip to Claude Code. Install puts it there.
 
 ```
-/meetey watch on      Turn it on
+/meetey watch on      Turn it back on
 /meetey watch         Is it on?
 /meetey watch off     Turn it off
 /meetey watch log     What it has done
@@ -263,13 +263,13 @@ Or from a terminal: `npx adamjhc/meetey watch enable | disable | status | log`.
 | ● red, with the time | Recording (a screen badge when the screen is captured too) | Menu: Stop, Pause My Microphone, Show Assistant |
 | ○ hollow, "ending soon" | The call seems to have ended | Menu: Keep Recording, Stop |
 
-"In a call" means the app is using the microphone, so the icon turns orange as you join and goes back when you hang up. Right-click any time for the menu, which also has **Record Anyway** for a call it hasn't noticed and **Turn Off Meetey**.
+"In a call" means the app is using the microphone, so the icon turns orange as you join and goes back when you hang up. Right-click any time for the menu, which also has **Record Anyway** for a call it hasn't noticed and **Quit Meetey** (until you next log in).
 
 **It's one icon, always there.** Recordings started with `/meetey start` show in it too rather than adding a second icon. That matters with a menu bar manager like Ice, Thaw or Tuck: tell it once to keep Meetey visible and it stays visible, recording or not. (Before 2.7.0 each recording added a new icon, and managers hide new icons by default.)
 
 **It never records on its own.** Nothing records until you click, and the icon is red for as long as it does.
 
-- **It is off until you turn it on**, and turning it on installs a login agent that persists across restarts until you turn it off.
+- **It's on by default.** Install and update put it in the menu bar, as a login agent. `/meetey watch off` turns it off for good, and updates leave it off.
 - **A click records the screen too.** Screen capture covers everything the app displays — other tabs, other windows, notification banners — so close or mute anything sensitive first. For audio only, use `/meetey start --audio-only`.
 - **A recording ends when the call does, when the app quits, or when you stop it.** Closing a window no longer ends it — that cost several recordings, because Google Meet replaces its window when you join a call.
 
@@ -308,7 +308,7 @@ Search is the one worth knowing about. Asking *"what did we decide about the API
 
 Nothing is uploaded to a third-party meeting service, and no bot joins your call. Audio and images never leave your machine unless Claude needs a specific keyframe to interpret a diagram. Summarization itself runs through Claude, so the *text* does go to the API — the same as anything else you'd paste into Claude Code.
 
-Nothing records without a person saying so. `/meetey start` is explicit, and the optional menu bar icon records only when clicked — there is no mode in which Meetey captures a meeting on its own. From Claude Code, screen capture is a separate opt-in requested per recording; a click on the icon records audio and screen, and the icon shows that for as long as it lasts.
+Nothing records without a person saying so. `/meetey start` is explicit, and the menu bar icon records only when clicked — there is no mode in which Meetey captures a meeting on its own. From Claude Code, screen capture is a separate opt-in requested per recording; a click on the icon records audio and screen, and the icon shows that for as long as it lasts.
 
 ## CLI
 
@@ -336,7 +336,7 @@ Meetey status
   ✔  binary code-signed
   ✔  whisper-cli  (/opt/homebrew/bin/whisper-cli)
   ✔  Whisper model (ggml-base.en.bin)  (~/.meetey/models/ggml-base.en.bin)
-  ○  menu bar icon (optional)  (off — enable: npx adamjhc/meetey watch enable)
+  ○  menu bar icon  (on — click the menu bar icon to record)
   ✔  MCP server files  (~/.meetey/mcp-server)
   ✔  MCP server registered in ~/.claude.json
   ✔  /meetey skill installed
@@ -427,7 +427,7 @@ watch agent   ↗  (~/.meetey/daemon/, optional)               → whisper-cli
 
 **`/meetey` skill** drives the user-facing flow: `list_apps → list_windows → start_recording → stop_recording → transcribe → get_keyframes`, then formats and saves the output.
 
-**Watch agent** is an optional launchd LaunchAgent that runs Meetey's menu bar icon and starts a recording when it's clicked. It is off until enabled and starts nothing without that click. Because it's a separate process from the MCP server, both coordinate through a state file keyed on process liveness — which is why `/meetey stop` can stop a recording the watcher started.
+**Watch agent** is a launchd LaunchAgent that runs Meetey's menu bar icon and starts a recording when it's clicked. It is on by default and starts nothing without that click. Because it's a separate process from the MCP server, both coordinate through a state file keyed on process liveness — which is why `/meetey stop` can stop a recording the watcher started.
 
 Two self-tests run without Screen Recording permission or a live meeting:
 
@@ -449,7 +449,7 @@ node ~/.meetey/daemon/watch.js --selftest   # menu bar commands → capture argu
 | `~/.meetey/models/ggml-base.en.bin` | Whisper model |
 | `~/.meetey/mcp-server/` | MCP server (stable install location) |
 | `~/.meetey/meetey-capture/` | Swift binary and sources |
-| `~/.meetey/daemon/` | Watch agent (dormant unless enabled) |
+| `~/.meetey/daemon/` | Watch agent (the menu bar icon) |
 | `~/.meetey/state/active.json` | Which recording is running, if any — removed when it ends |
 | `~/.meetey/state/pending.json` | A finished recording nobody has written up yet |
 | `~/.meetey/state/capture-status.json` | What the running recording is doing, for the menu bar icon |

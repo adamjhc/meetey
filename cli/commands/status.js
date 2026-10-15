@@ -55,16 +55,16 @@ export async function status() {
   const modelOk = existsSync(MODEL_PATH);
   check("Whisper model (ggml-base.en.bin)", modelOk, modelOk ? MODEL_PATH : "run: npx adamjhc/meetey install");
 
-  // Watch agent — optional, and off unless deliberately enabled.
+  // Watch agent — Meetey's menu bar icon. On by default since 2.7.1.
   const watchInstalled = existsSync(WATCH_SCRIPT);
   const watchEnabled = existsSync(WATCH_PLIST);
-  // Not a check() — off is a valid state, and the default one.
+  // Not a check() — off is a valid state the user can choose.
   const watchNote = watchEnabled
     ? "on — click the menu bar icon to record"
     : watchInstalled
-      ? "off — enable: npx adamjhc/meetey watch enable"
+      ? "off — on again: npx adamjhc/meetey watch enable"
       : "off — run update to install it";
-  console.log(`  \x1b[2m\u25cb\x1b[0m  menu bar icon (optional)  \x1b[2m(${watchNote})\x1b[0m`);
+  console.log(`  \x1b[2m\u25cb\x1b[0m  menu bar icon  \x1b[2m(${watchNote})\x1b[0m`);
 
   // MCP server
   const serverOk = existsSync(`${SERVER_DIR}/index.js`);

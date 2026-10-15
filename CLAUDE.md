@@ -74,8 +74,12 @@ The admin tools were reachable by natural language from the start; the subcomman
 ## The watch agent
 
 **`daemon/watch.js`** — a launchd LaunchAgent that keeps **Meetey's one menu bar
-icon** running and starts a recording when it's clicked. Off until
-`npx adamjhc/meetey watch enable`; `disable`, `status`, and `logs` round out the CLI
+icon** running and starts a recording when it's clicked. **On by default since
+2.7.1**: `install` and `update` enable it (non-strict — see below), because an icon
+that records only when clicked has nothing to opt into. `watch disable` turns it off
+for good by writing `state/watch-off` (`watchTurnedOff`), which install and update
+respect; **Quit Meetey** in its menu only boots the job out until the next login, and
+is hidden while recording. `enable`, `status`, and `logs` round out the CLI
 (`cli/commands/watch.js`). The names (`watch`, `*_watcher` tools) predate 2.7.0 and
 were kept for compatibility.
 
@@ -122,11 +126,12 @@ needs AppKit, which Node cannot reach. Every second it decides between:
   `watchAgentRunning()` is false. Don't reintroduce a second item or a stand-aside.
 - It exits when `getppid()` becomes 1 (a crashed daemon would otherwise leave a
   second icon after launchd restarts it). The daemon restarts a dead icon with
-  backoff. **Turn Off Meetey** removes the plist and boots the job out.
+  backoff.
 
 `enable_watcher` **verifies before reporting success**: it bootstraps the agent, waits
 for the icon to write `state/watch-health.json`, and tears the install back down if
-node lacks Screen Recording. The icon checks with `CGPreflightScreenCaptureAccess()`,
+node lacks Screen Recording — unless called with `strict: false`, as install and
+update do, which leaves it running with a warning and the fix. The icon checks with `CGPreflightScreenCaptureAccess()`,
 which asks TCC about its *responsible* process — the job's node — without opening a
 capture connection. A check from the CLI would be attributed to the terminal and could
 pass while the agent can't record. `watchMessage` is pure so every state, including
@@ -164,9 +169,8 @@ alone.
 `enable_watcher` need it, and only `mcp-server/` and `daemon/` are copied into
 `~/.meetey` — the CLI runs from the npx package and isn't on the machine
 afterwards. Every path is derived from arguments, never the environment, so the
-CLI's idea of where meetey lives can't drift from the server's. The skill must
-not enable the watcher unprompted: it installs a login agent that survives
-restarts, so it is a thing to offer, not to switch on helpfully.
+CLI's idea of where meetey lives can't drift from the server's. If the user turned
+it off, the skill should not turn it back on unasked.
 
 **`mcp-server/session-state.js`** — the single answer to "is a recording running",
 shared across processes. The MCP server's in-memory state was sufficient while it
