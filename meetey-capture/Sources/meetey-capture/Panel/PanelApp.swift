@@ -24,6 +24,8 @@ struct ChatMessage: Identifiable {
     var text: String
     var detail: String? = nil
     var streaming = false
+    /// Answered on the auto timer rather than to a question.
+    var auto = false
 }
 
 @MainActor
@@ -34,6 +36,9 @@ final class PanelModel: ObservableObject {
     @Published var attachScreen = false
     @Published var busy = false
     @Published var recording = true
+    /// Ask `autoPrompt` every `autoInterval` while on. Off whenever a panel
+    /// opens: it spends Claude turns, so it's chosen per meeting.
+    @Published var autoAsk = false { didSet { autoAskChanged() } }
 
     let title: String
     private let context: MeetingContext
@@ -43,6 +48,12 @@ final class PanelModel: ObservableObject {
     private var session: ClaudeSession?
     private var timer: Timer?
     private var answerIndex: Int?
+    private var autoTimer: Timer?
+    private let autoPrompt: String
+    let autoInterval: TimeInterval
+    /// An auto answer arriving: held back until it's clearly not "—", so a
+    /// round with nothing to say never shows up at all.
+    private var autoBuffer: String?
 
     init(title: String, liveDir: URL, framesDir: String?, startedAt: Date, capturePid: pid_t?, claudePath: String?) {
         self.title = title
@@ -50,9 +61,11 @@ final class PanelModel: ObservableObject {
         self.startedAt = startedAt
         self.capturePid = capturePid
         self.chatLog = liveDir.appendingPathComponent("chat.md")
+        let config = AssistantConfig.load()
+        self.autoPrompt = config.autoPrompt
+        self.autoInterval = config.autoInterval
 
         if let claudePath {
-            let config = AssistantConfig.load()
             session = ClaudeSession(claudePath: claudePath, workingDirectory: config.workingDirectory,
                                     readableDirectories: [liveDir.path, framesDir].compactMap { $0 } + config.additionalDirectories,
                                     tools: config.tools, model: config.model) { [weak self] event in
@@ -78,6 +91,37 @@ final class PanelModel: ObservableObject {
         if let capturePid, kill(capturePid, 0) != 0, errno == ESRCH, recording {
             recording = false
         }
+    }
+
+    private func autoAskChanged() {
+        autoTimer?.invalidate()
+        autoTimer = nil
+        guard autoAsk else { return }
+        let timer = Timer(timeInterval: autoInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.autoRound() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoTimer = timer
+        autoRound()
+    }
+
+    /// One auto round: skipped while Claude is answering, and when nothing has
+    /// been said or shown since the last message — no turn spent on silence.
+    private func autoRound() {
+        guard autoAsk, !busy, let session else { return }
+        guard recording || context.hasNewContent() else { autoAsk = false; return }
+        guard context.hasNewContent() else { return }
+        let built = context.build(request: autoPrompt, pinned: pinned, attachScreen: false, nowMs: nowMs)
+        autoBuffer = ""
+        answerIndex = nil
+        busy = true
+        session.send(built.message)
+    }
+
+    /// Whether a held-back auto answer has turned out to be something.
+    private static func isSomething(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !(t.isEmpty || t == "—" || t == "-" || t == "–")
     }
 
     func send() {
@@ -114,6 +158,14 @@ final class PanelModel: ObservableObject {
         case .ready:
             break
         case .delta(let text):
+            if answerIndex == nil, let buffer = autoBuffer {
+                autoBuffer = buffer + text
+                guard Self.isSomething(autoBuffer!) else { return }
+                messages.append(ChatMessage(role: .assistant, text: autoBuffer!, streaming: true, auto: true))
+                answerIndex = messages.count - 1
+                appendLog("*\(meetingTimestamp(nowMs)) Auto check*\n\n")
+                return
+            }
             guard let i = answerIndex else { return }
             messages[i].detail = nil
             messages[i].text += text
@@ -122,6 +174,12 @@ final class PanelModel: ObservableObject {
             messages[i].detail = Self.describe(tool)
             if !messages[i].text.isEmpty { messages[i].text += "\n\n" }
         case .finished(let isError, let text):
+            if answerIndex == nil, autoBuffer != nil, Self.isSomething(text) {
+                messages.append(ChatMessage(role: .assistant, text: text, auto: true))
+                answerIndex = messages.count - 1
+                appendLog("*\(meetingTimestamp(nowMs)) Auto check*\n\n")
+            }
+            autoBuffer = nil
             if let i = answerIndex {
                 if messages[i].text.isEmpty { messages[i].text = text }
                 if isError { messages[i].detail = "Claude reported an error" }
@@ -131,6 +189,7 @@ final class PanelModel: ObservableObject {
             answerIndex = nil
             busy = false
         case .failed(let why):
+            autoBuffer = nil
             if let i = answerIndex {
                 messages[i].streaming = false
                 if messages[i].text.isEmpty { messages.remove(at: i) }
@@ -170,6 +229,7 @@ final class PanelModel: ObservableObject {
 
     func shutdown() {
         timer?.invalidate()
+        autoTimer?.invalidate()
         session?.stop()
     }
 }
@@ -200,6 +260,11 @@ struct PanelView: View {
                     .accessibilityLabel(model.recording ? "Recording" : "Recording ended")
                 Text(model.title).font(.headline).lineLimit(1).truncationMode(.middle)
                 Spacer()
+                Toggle(isOn: $model.autoAsk) { Image(systemName: model.autoAsk ? "timer.circle.fill" : "timer") }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help("Auto: every \(Int(model.autoInterval))s, ask Claude whether anything new is worth flagging. Silent when there's nothing")
+                    .accessibilityLabel("Auto check every \(Int(model.autoInterval)) seconds")
                 Toggle(isOn: $showPinned) { Image(systemName: showPinned ? "pin.fill" : "pin") }
                     .toggleStyle(.button)
                     .controlSize(.small)
@@ -288,6 +353,9 @@ struct MessageRow: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant:
             VStack(alignment: .leading, spacing: 6) {
+                if message.auto {
+                    Label("Auto", systemImage: "timer").font(.caption2).foregroundStyle(.secondary)
+                }
                 if let detail = message.detail {
                     Label(detail, systemImage: "eye").font(.caption).foregroundStyle(.secondary)
                 } else if message.text.isEmpty && message.streaming {

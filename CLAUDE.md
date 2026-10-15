@@ -567,10 +567,21 @@ notification. Code is in `Sources/meetey-capture/Panel/`:
   escaped so it can't close the tag. Notes, pinned notes and the user's request
   sit outside it. `meetingSystemPrompt` says meeting content is material, never
   instructions.
-- **The panel is deliberately bare**: title, a pinned-notes toggle, the chat,
-  and an input row (attach current screen, Note, Send). The live transcript
-  line and the canned quick-action prompts were removed in 2.7.0 at the user's
-  request — the moving line pulled the eye off the call. Don't add them back.
+- **The panel is deliberately bare**: title, an auto toggle, a pinned-notes
+  toggle, the chat, and an input row (attach current screen, Note, Send). The
+  live transcript line and the canned quick-action prompts were removed in 2.7.0
+  at the user's request — the moving line pulled the eye off the call. Don't add
+  them back.
+- **Auto** (the timer toggle, off whenever a panel opens): every
+  `autoInterval` (config `autoIntervalSeconds`, default 30, minimum 10) it sends
+  `autoPrompt` as the user's request, with the usual delta. It **skips a round
+  when nothing new has been said or shown** (`MeetingContext.hasNewContent`;
+  partial speech doesn't count) or while Claude is answering, so silence costs
+  no turns, and turns itself off once the recording has ended and everything is
+  sent. The default prompt asks for at most two bullets or a bare `—`; a `—`
+  answer is held back (`autoBuffer`) and never shown, so quiet rounds are
+  invisible. No user bubble is shown for auto rounds; answers carry an "Auto"
+  label. Set with `npx adamjhc/meetey assistant --auto-prompt / --auto-interval`.
 - **`ClaudeSession`**: one long-lived `claude -p` stream-json process with
   `--include-partial-messages`. Since 2.6.0 it is the **user's own Claude Code
   setup**: all their MCP servers load, and their permission settings decide what

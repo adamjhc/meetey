@@ -32,7 +32,8 @@ Commands:
   live      Show the running meeting's transcript and screen text as it happens
   assistant Open the in-call assistant panel for the running (or latest) meeting
             (--folder <path> sets the code folder Claude works in, --model <name>
-            the model it uses; --config shows both)
+            the model, --auto-prompt / --auto-interval the auto button; --config
+            shows them)
   watch     Meetey's menu bar icon, on by default: orange in a call, click to record
             (enable | disable | status | logs)
 

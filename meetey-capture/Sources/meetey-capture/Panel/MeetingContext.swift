@@ -129,6 +129,13 @@ final class MeetingContext {
         pendingNotes.append((atMs, text))
     }
 
+    /// Whether anything said or shown hasn't been sent yet. Unfinished speech
+    /// doesn't count: it will be a line soon, and asking about it twice wastes a turn.
+    func hasNewContent() -> Bool {
+        LiveReader.lines(in: liveDir).contains { !sentLines.contains($0.key) }
+            || LiveReader.frames(in: liveDir).contains { !sentFrames.contains($0.key) }
+    }
+
     /// Newest keyframe on disk, for "this screen".
     func newestFrame() -> LiveFrame? {
         LiveReader.frames(in: liveDir).max { $0.offsetMs < $1.offsetMs }

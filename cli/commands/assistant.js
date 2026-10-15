@@ -54,6 +54,9 @@ export function assistantConfig() {
     additionalDirectories: (raw.additionalDirectories ?? []).map(expand),
     tools: raw.tools?.length ? raw.tools : DEFAULT_TOOLS,
     model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : DEFAULT_MODEL,
+    // Shown, not the full default text: AssistantConfig.swift owns that.
+    autoPrompt: typeof raw.autoPrompt === "string" && raw.autoPrompt.trim() ? raw.autoPrompt.trim() : null,
+    autoIntervalSeconds: Math.max(10, Number(raw.autoIntervalSeconds) || 30),
   };
 }
 
@@ -93,6 +96,21 @@ export async function assistant(target, rest = []) {
     if (!rest[0]) { console.log("Usage: npx adamjhc/meetey assistant --folder <path>"); return false; }
     return setFolder(rest[0]);
   }
+  // The panel's auto button: what it asks, and how often.
+  if (target === "--auto-prompt") {
+    const text = rest.join(" ").trim();
+    if (!text) { console.log('Usage: npx adamjhc/meetey assistant --auto-prompt "<what to ask every round>"   (--auto-prompt default restores it)'); return false; }
+    setAssistantSetting("autoPrompt", text === "default" ? undefined : text);
+    console.log(text === "default" ? "The auto button uses its built-in prompt again." : "The auto button now asks that. Panels opened from now on use it.");
+    return true;
+  }
+  if (target === "--auto-interval") {
+    const seconds = Number(rest[0]);
+    if (!Number.isFinite(seconds) || seconds < 10) { console.log("Usage: npx adamjhc/meetey assistant --auto-interval <seconds, 10 or more>"); return false; }
+    setAssistantSetting("autoIntervalSeconds", seconds);
+    console.log(`The auto button now asks every ${seconds}s. Panels opened from now on use it.`);
+    return true;
+  }
   if (target === "--model") {
     if (!rest[0]?.trim()) { console.log("Usage: npx adamjhc/meetey assistant --model <sonnet|opus|model-id>"); return false; }
     return setModel(rest[0].trim());
@@ -100,6 +118,7 @@ export async function assistant(target, rest = []) {
   if (target === "--config") {
     const c = assistantConfig();
     console.log(`Model: ${c.model}`);
+    console.log(`Auto button: every ${c.autoIntervalSeconds}s — ${c.autoPrompt ? `"${c.autoPrompt}"` : "built-in prompt (anything worth flagging; silent otherwise)"}`);
     console.log(`Folder: ${c.workingDirectory}${c.configuredDirectory && c.configuredDirectory !== c.workingDirectory ? `  (configured ${c.configuredDirectory} doesn't exist)` : ""}`);
     if (c.additionalDirectories.length) console.log(`Also readable: ${c.additionalDirectories.join(", ")}`);
     console.log(`Built-in tools: ${c.tools.join(", ")}, plus your Claude Code MCP servers. Your permission settings decide what may run.`);

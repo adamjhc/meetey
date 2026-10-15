@@ -19,7 +19,8 @@ import Foundation
 ///     { "assistant": { "workingDirectory": "~/projects",
 ///                      "additionalDirectories": ["~/other-code"],
 ///                      "tools": ["Read", "Grep", "Glob", "Bash"],
-///                      "model": "sonnet" } }
+///                      "model": "sonnet",
+///                      "autoPrompt": "…", "autoIntervalSeconds": 30 } }
 ///
 /// Written by `npx adamjhc/meetey assistant --folder <path> --model <name>`. Local only, never
 /// committed: the fork is public and these are paths on a work machine.
@@ -36,7 +37,17 @@ struct AssistantConfig {
     /// Set here rather than in the panel, so the panel has nothing to fiddle with mid-call.
     let model: String
 
+    /// What the panel's auto button asks, on a timer, while it is on. Sent as
+    /// the user's request, so it's the user's words, not meeting content.
+    let autoPrompt: String
+    let autoInterval: TimeInterval
+
     static let defaultModel = "sonnet"
+    static let defaultAutoPrompt = """
+        Anything in what's new worth flagging to me right now — a question I should answer, \
+        a claim or number to check, a decision or action item, an error on screen? \
+        One or two short bullets. If there's nothing worth interrupting me for, reply with only: —
+        """
     static let defaultTools = ["Read", "Grep", "Glob", "Bash"]
 
     static func load() -> AssistantConfig {
@@ -61,6 +72,9 @@ struct AssistantConfig {
             workingDirectory: URL(fileURLWithPath: working),
             additionalDirectories: (raw["additionalDirectories"] as? [String] ?? []).map(expand),
             tools: (raw["tools"] as? [String]).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTools,
-            model: (raw["model"] as? String).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? defaultModel)
+            model: (raw["model"] as? String).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? defaultModel,
+            autoPrompt: (raw["autoPrompt"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? defaultAutoPrompt,
+            // Not below 10s: each round is a Claude turn on the user's account.
+            autoInterval: max(10, (raw["autoIntervalSeconds"] as? Double) ?? 30))
     }
 }
