@@ -56,7 +56,7 @@ enum MeetingDetector {
             return Microphone.appUsesInput(bundleID: bundleID, pid: app.processIdentifier, using: inputs) == true
         }
         guard !inCall.isEmpty else { return [] }
-        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
         return inCall.compactMap { app in
             guard let bundleID = app.bundleIdentifier else { return nil }
@@ -66,24 +66,42 @@ enum MeetingDetector {
         }
     }
 
-    /// The app's largest ordinary on-screen window that isn't one of Teams' own
-    /// screens. Titles need Screen Recording permission; without it there is
-    /// no title, and the app's name is used instead.
+    /// The app's meeting window, best guess first.
+    ///
+    /// Off-screen windows count: while Teams shares the screen it hides the
+    /// meeting window ("Meeting with Adam Cox") and floats a compact view
+    /// instead, and the hidden one is the window that disappears when the call
+    /// ends. `MeetingWindow.isOpen` also counts off-screen windows, so it can
+    /// be watched while hidden. Ranked by: titled (titles need Screen
+    /// Recording; without it the app's name is used), an ordinary window
+    /// rather than a floating one, on screen, then size. Teams' own screens and
+    /// slivers like its sharing control bar never count.
     static func meetingWindow(of pid: pid_t, bundleID: String, in windows: [[String: Any]]) -> (id: UInt32, title: String?)? {
-        var best: (id: UInt32, title: String?, area: Double)?
+        typealias Rank = (titled: Bool, ordinary: Bool, onScreen: Bool, area: Double)
+        func better(_ a: Rank, than b: Rank) -> Bool {
+            if a.titled != b.titled { return a.titled }
+            if a.ordinary != b.ordinary { return a.ordinary }
+            if a.onScreen != b.onScreen { return a.onScreen }
+            return a.area > b.area
+        }
+        var best: (id: UInt32, title: String?, rank: Rank)?
         for window in windows {
             guard (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid,
-                  (window[kCGWindowLayer as String] as? Int) == 0,
+                  let layer = window[kCGWindowLayer as String] as? Int, (0..<100).contains(layer),
                   let number = (window[kCGWindowNumber as String] as? Int).map(UInt32.init),
                   let bounds = window[kCGWindowBounds as String] as? [String: Any],
                   let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double,
-                  width >= 300, height >= 200 else { continue }
+                  width >= 150, height >= 100 else { continue }
             let title = (window[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let onScreen = window[kCGWindowIsOnscreen as String] as? Bool ?? false
+            // Untitled off-screen windows are an app's hidden scaffolding.
+            if title == nil && !onScreen { continue }
             if isTeams(bundleID), let title,
                teamsSections.contains(title.split(separator: "|").first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? "") {
                 continue
             }
-            if best == nil || width * height > best!.area { best = (number, title, width * height) }
+            let rank: Rank = (title != nil, layer == 0, onScreen, width * height)
+            if best == nil || better(rank, than: best!.rank) { best = (number, title, rank) }
         }
         return best.map { ($0.id, $0.title) }
     }
@@ -150,6 +168,9 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
     private var state: State = .idle
     private let menu = NSMenu()
     private var starting: Date?
+    /// The "Audio + screen · 12:04" line while the menu is open, so the time
+    /// keeps moving; the rest of the menu is rebuilt each time it opens.
+    private var timeItem: NSMenuItem?
 
     init?(statusFile: String, healthFile: String?, plistPath: String?) {
         guard !NSScreen.screens.isEmpty else { return nil }
@@ -171,8 +192,10 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         refresh()
+        // Runs in .common modes, so it keeps firing while the menu is open, and
+        // directly on the main actor rather than through a Task.
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            MainActor.assumeIsolated { self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
         poll = timer
@@ -197,6 +220,7 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
         }
         state = next
         render()
+        if let timeItem, case .recording(let r) = next { timeItem.title = Self.summary(r) }
     }
 
     /// The recording in progress, from the capture's status file — only while
@@ -279,6 +303,7 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
     /// Built fresh each time it opens, so it always matches what is happening.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        timeItem = nil
         func header(_ title: String) {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -294,7 +319,8 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
         switch state {
         case .recording(let r):
             header(RecordingIndicator.truncateMiddle(r.label, to: 40))
-            header("\(r.video ? "Audio + screen" : "Audio only")\(r.mic ? (r.micPaused ? ", mic paused" : " + mic") : "") · \(RecordingIndicator.clock(Int(Date().timeIntervalSince(r.startedAt))))")
+            header(Self.summary(r))
+            timeItem = menu.items.last
             menu.addItem(.separator())
             if r.state == "endingSoon" { action("Keep Recording", #selector(keepRecording)) }
             if r.mic { action(r.micPaused ? "Resume My Microphone" : "Pause My Microphone", #selector(toggleMic)) }
@@ -330,6 +356,14 @@ final class MenuBarAgent: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         action("Turn Off Meetey", #selector(turnOff))
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        timeItem = nil
+    }
+
+    private static func summary(_ r: Recording) -> String {
+        "\(r.video ? "Audio + screen" : "Audio only")\(r.mic ? (r.micPaused ? ", mic paused" : " + mic") : "") · \(RecordingIndicator.clock(Int(Date().timeIntervalSince(r.startedAt))))"
     }
 
     // MARK: Actions

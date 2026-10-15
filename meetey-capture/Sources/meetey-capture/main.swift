@@ -31,6 +31,7 @@ struct Args {
     let listApps: Bool
     let listDisplays: Bool
     let listWindows: Bool
+    let listCalls: Bool
     let displayID: UInt32?
     let windowID: UInt32?
     let selfTest: Bool
@@ -94,6 +95,7 @@ struct Args {
         var listApps = false
         var listDisplays = false
         var listWindows = false
+        var listCalls = false
         var displayID: UInt32? = nil
         var windowID: UInt32? = nil
         var selfTest = false
@@ -149,6 +151,7 @@ struct Args {
             case "--list-apps":       listApps = true
             case "--list-displays":   listDisplays = true
             case "--list-windows":    listWindows = true
+            case "--list-calls":      listCalls = true
             case "--display":         displayID = UInt32(it.next() ?? "")
             case "--window":          windowID = UInt32(it.next() ?? "")
             case "--selftest":        selfTest = true
@@ -198,7 +201,7 @@ struct Args {
             }
         }
         return Args(bundleID: bundleID, outputPath: outputPath, stopAfter: stopAfter,
-                    listApps: listApps, listDisplays: listDisplays, listWindows: listWindows,
+                    listApps: listApps, listDisplays: listDisplays, listWindows: listWindows, listCalls: listCalls,
                     displayID: displayID, windowID: windowID,
                     selfTest: selfTest, verifyMode: verifyMode, video: video, fps: fps,
                     framesDir: framesDir, ocr: ocr, sceneThreshold: sceneThreshold,
@@ -2763,6 +2766,15 @@ Task {
             try await listApps()
         } else if args.listDisplays {
             try await listDisplays()
+        } else if args.listCalls {
+            // What the menu bar icon sees: apps in a call and their meeting
+            // windows. No ScreenCaptureKit, so safe during a recording.
+            let calls = MeetingDetector.candidates().map { c -> [String: Any] in
+                ["bundleID": c.bundleID, "app": c.appName, "pid": Int(c.pid),
+                 "windowID": c.windowID.map { Int($0) } ?? NSNull(), "title": c.title ?? NSNull()]
+            }
+            let data = try JSONSerialization.data(withJSONObject: calls, options: [.prettyPrinted])
+            print(String(decoding: data, as: UTF8.self))
         } else if args.listWindows {
             try await listWindows(bundleID: args.bundleID)
         } else {
@@ -2773,6 +2785,7 @@ Task {
                        meetey-capture --list-apps
                        meetey-capture --list-displays
                        meetey-capture --list-windows [--app <bundle-id>]
+                       meetey-capture --list-calls
 
                 Options:
                   --stop-after <seconds>    Stop automatically after this long
