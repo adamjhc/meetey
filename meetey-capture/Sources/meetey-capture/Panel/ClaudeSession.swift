@@ -75,7 +75,7 @@ final class ClaudeSession {
     private var stdin: FileHandle?
     private var buffer = Data()
     private(set) var sessionId: String?
-    private(set) var model: String
+    let model: String
     private var expectingExit = false
 
     init(claudePath: String, workingDirectory: URL, readableDirectories: [String], tools: [String], model: String,
@@ -96,13 +96,6 @@ final class ClaudeSession {
         guard var data = try? JSONSerialization.data(withJSONObject: object) else { return }
         data.append(0x0A)
         stdin?.write(data)
-    }
-
-    func switchModel(to newModel: String) {
-        guard newModel != model else { return }
-        model = newModel
-        if isRunning { stop() }
-        // Started lazily by the next send, resuming the same conversation.
     }
 
     func stop() {

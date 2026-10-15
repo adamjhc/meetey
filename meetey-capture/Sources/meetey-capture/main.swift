@@ -50,7 +50,6 @@ struct Args {
     let menuBar: Bool
     let label: String
     let watchIndicator: Bool
-    let stateFile: String
     let plistPath: String
     /// Also record the default microphone to this path (see MicCapture.swift).
     let micPath: String?
@@ -76,12 +75,17 @@ struct Args {
     let capturePid: pid_t?
     let claudePath: String?
     let panelAsk: [String]
-    let model: String
+    /// Overrides the configured model, for `--panel-ask` testing.
+    let model: String?
     /// The meeting's window, so its closing can confirm the call is over.
     let meetingWindow: UInt32?
     let meetingTitle: String
     let quickEndGrace: TimeInterval
     let fallbackEndGrace: TimeInterval
+    /// Where a capture publishes its state for the menu bar agent.
+    let statusFile: String?
+    /// Where the menu bar agent reports whether it can see windows.
+    let healthFile: String?
 
     static func parse() -> Args {
         var bundleID = ""
@@ -109,7 +113,6 @@ struct Args {
         var menuBar = false
         var label = ""
         var watchIndicator = false
-        var stateFile = ""
         var plistPath = ""
         var micPath: String? = nil
         var recordMic = false
@@ -129,11 +132,13 @@ struct Args {
         var capturePid: pid_t? = nil
         var claudePath: String? = nil
         var panelAsk: [String] = []
-        var model = "sonnet"
+        var model: String? = nil
         var meetingWindow: UInt32? = nil
         var meetingTitle = ""
         var quickEndGrace: TimeInterval = 5
         var fallbackEndGrace: TimeInterval = 600
+        var statusFile: String? = nil
+        var healthFile: String? = nil
         let args = CommandLine.arguments.dropFirst()
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -163,7 +168,6 @@ struct Args {
             case "--menu-bar":        menuBar = true
             case "--label":           label = it.next() ?? ""
             case "--watch-indicator": watchIndicator = true
-            case "--state-file":      stateFile = it.next() ?? ""
             case "--plist":           plistPath = it.next() ?? ""
             case "--mic":             micPath = it.next()
             case "--record-mic":      recordMic = true
@@ -183,11 +187,13 @@ struct Args {
             case "--capture-pid":     capturePid = pid_t(it.next() ?? "")
             case "--claude":          claudePath = it.next()
             case "--panel-ask":       if let q = it.next() { panelAsk.append(q) }
-            case "--model":           model = it.next() ?? "sonnet"
+            case "--model":           model = it.next()
             case "--meeting-window":  meetingWindow = UInt32(it.next() ?? "")
             case "--meeting-title":   meetingTitle = it.next() ?? ""
             case "--quick-end-grace": quickEndGrace = TimeInterval(it.next() ?? "") ?? 5
             case "--fallback-end-grace": fallbackEndGrace = TimeInterval(it.next() ?? "") ?? 600
+            case "--status-file":     statusFile = it.next()
+            case "--health-file":     healthFile = it.next()
             default: break
             }
         }
@@ -200,7 +206,7 @@ struct Args {
                     volatilityMask: volatilityMask, autoStop: autoStop,
                     autoStopGrace: autoStopGrace, stopWhenCallEnds: stopWhenCallEnds,
                     callEndGrace: callEndGrace, menuBar: menuBar, label: label,
-                    watchIndicator: watchIndicator, stateFile: stateFile, plistPath: plistPath,
+                    watchIndicator: watchIndicator, plistPath: plistPath,
                     micPath: micPath, recordMic: recordMic, epochMs: epochMs,
                     responsibleCheck: responsibleCheck, verifyMic: verifyMic,
                     preflightSpeech: preflightSpeech, liveDir: liveDir, replayPath: replayPath,
@@ -209,7 +215,7 @@ struct Args {
                     startedAtMs: startedAtMs, capturePid: capturePid, claudePath: claudePath,
                     panelAsk: panelAsk, model: model, meetingWindow: meetingWindow,
                     meetingTitle: meetingTitle, quickEndGrace: quickEndGrace,
-                    fallbackEndGrace: fallbackEndGrace)
+                    fallbackEndGrace: fallbackEndGrace, statusFile: statusFile, healthFile: healthFile)
     }
 }
 
@@ -1051,7 +1057,7 @@ final class RecordingIndicator: NSObject {
         item.button?.setAccessibilityTitle(text)
     }
 
-    private static func symbol(_ name: String, color: NSColor) -> NSImage? {
+    static func symbol(_ name: String, color: NSColor) -> NSImage? {
         guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
         return base.withSymbolConfiguration(.init(paletteColors: [color]))
     }
@@ -1122,175 +1128,6 @@ func postNotification(title: String, subtitle: String, body: String) {
     process.arguments = ["-e", script]
     try? process.run()
     process.waitUntilExit()
-}
-
-// MARK: - Watcher indicator
-
-/// The menu bar presence of the watch agent, for as long as it is running.
-///
-/// Deliberately the quiet counterpart to `RecordingIndicator`: a monochrome
-/// dotted outline against that one's solid red. Watching and recording are
-/// different things to be told, and the difference has to be legible at a glance
-/// — if this competed with the recording dot it would weaken the only
-/// continuously-visible signal that a recording is happening.
-///
-/// **It is still while idle.** Motion happens at the seams — settling in when the
-/// agent starts, standing aside when a recording begins, returning when it ends.
-/// A menu bar icon that moves for hours is the animation-fatigue failure; there
-/// is nothing to communicate between state changes, so nothing moves.
-@MainActor
-final class WatcherIndicator: NSObject {
-    private let item: NSStatusItem
-    private let plistPath: String?
-    private let statusLine = NSMenuItem()
-    private var recordingActive = false
-    private var poll: Timer?
-
-    /// Entrance timing. Exits run at 75% — leaving should be quicker than arriving.
-    private static let enterDuration: TimeInterval = 0.5
-    private static let exitDuration: TimeInterval = 0.375
-    /// Natural deceleration; no bounce, which would draw attention to the motion
-    /// rather than to what changed.
-    private static let easeOutQuart = CAMediaTimingFunction(controlPoints: 0.25, 1, 0.5, 1)
-
-    /// macOS's own reduce-motion switch. Not optional to honour: someone who has
-    /// asked the system to stop animating things has asked us too.
-    private static var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    }
-
-    init?(stateFile: String, plistPath: String?) {
-        guard !NSScreen.screens.isEmpty else { return nil }
-        self.plistPath = plistPath
-        self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        super.init()
-
-        // See RecordingIndicator. Asserting visibility matters more here: this
-        // item hides itself while a recording runs, and a named item would
-        // otherwise come back hidden if the process ended mid-recording.
-        item.autosaveName = "com.adamjhcox.meetey.status.watching"
-        item.isVisible = true
-
-        item.button?.image = NSImage(systemSymbolName: "circle.dotted",
-                                     accessibilityDescription: "Meetey is watching for meetings")
-        item.button?.setAccessibilityLabel("Meetey is watching for meetings")
-
-        let menu = NSMenu()
-        statusLine.title = "Watching for meetings"
-        statusLine.isEnabled = false
-        menu.addItem(statusLine)
-        menu.addItem(.separator())
-        let stop = NSMenuItem(title: "Stop Watching", action: #selector(stopWatching), keyEquivalent: "")
-        stop.target = self
-        menu.addItem(stop)
-        item.menu = menu
-
-        settleIn()
-        // Cheap: reading one small file. The alternative, watching the file, adds
-        // failure modes for a two-second delay nobody perceives.
-        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.exitIfOrphaned()
-                self?.syncWithRecordingState(stateFile: stateFile)
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        poll = timer
-    }
-
-    /// The indicator says "the watcher is running", so it must not outlive it.
-    ///
-    /// A clean stop signals us, but a crash or SIGKILL does not — and launchd
-    /// then restarts the agent, which starts a second indicator. Two icons
-    /// claiming the same thing, one of them lying. Reparenting to pid 1 is the
-    /// signal that the parent is gone.
-    private func exitIfOrphaned() {
-        guard getppid() == 1 else { return }
-        NSStatusBar.system.removeStatusItem(item)
-        exit(0)
-    }
-
-    /// Arriving: fade up rather than appearing abruptly in a bar the user is
-    /// probably already looking at.
-    private func settleIn() {
-        guard let button = item.button else { return }
-        guard !Self.reduceMotion else { button.alphaValue = 1; return }
-        button.alphaValue = 0
-        animate(button, to: 1, duration: Self.enterDuration)
-    }
-
-    private func animate(_ button: NSStatusBarButton, to alpha: CGFloat, duration: TimeInterval) {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = duration
-            context.timingFunction = Self.easeOutQuart
-            button.animator().alphaValue = alpha
-        }
-    }
-
-    /// A recording has its own, louder indicator. Two dots in the menu bar saying
-    /// overlapping things is worse than one saying the important thing, so this
-    /// steps aside for the duration and comes back afterwards.
-    private func syncWithRecordingState(stateFile: String) {
-        let active = FileManager.default.fileExists(atPath: stateFile)
-        guard active != recordingActive else { return }
-        recordingActive = active
-        statusLine.title = active ? "Recording — see the red indicator" : "Watching for meetings"
-
-        guard let button = item.button else { return }
-
-        // Fading to zero alpha hides the icon but keeps its slot in the menu bar,
-        // so the recording indicator arrives into a bar that is one item fuller
-        // than it looks. On a crowded bar macOS silently drops what does not fit,
-        // and the newest item — the red dot — is what gets dropped. Only
-        // `isVisible` actually gives the space back.
-        guard !Self.reduceMotion else {
-            button.alphaValue = active ? 0 : 1
-            item.isVisible = !active
-            return
-        }
-
-        if active {
-            // Fade out, then release the slot, so the red dot has room.
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = Self.exitDuration
-                context.timingFunction = Self.easeOutQuart
-                button.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                Task { @MainActor in
-                    guard let self, self.recordingActive else { return }
-                    self.item.isVisible = false
-                }
-            })
-        } else {
-            // Take a slot again before fading back in, or there is nothing to fade.
-            item.isVisible = true
-            button.alphaValue = 0
-            animate(button, to: 1, duration: Self.enterDuration)
-        }
-    }
-
-    @objc private func stopWatching() {
-        // Same two steps as `disableWatch`: unload the agent, then remove the
-        // plist so it does not return at next login.
-        // The label is the plist's name, so it can't drift from the one the
-        // agent was installed under.
-        let uid = String(getuid())
-        let label = plistPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
-            ?? "com.adamjhcox.meetey.watch"
-        run("/bin/launchctl", ["bootout", "gui/\(uid)/\(label)"])
-        if let plistPath { try? FileManager.default.removeItem(atPath: plistPath) }
-        NSStatusBar.system.removeStatusItem(item)
-        exit(0)
-    }
-
-    private func run(_ path: String, _ args: [String]) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = args
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
-    }
 }
 
 // MARK: - Call-end detection
@@ -2631,18 +2468,46 @@ func record(args: Args) async throws {
         vetoLock.withLock { let v = userVetoedEnd; userVetoedEnd = false; return v }
     }
 
+    // State for the menu bar agent, which shows this recording in its icon.
+    let status = CaptureStatus(path: args.statusFile, base: [
+        "pid": Int(getpid()),
+        "startedAtMs": Int(startedAt.timeIntervalSince1970 * 1000),
+        "label": args.label.isEmpty ? "Meeting" : args.label,
+        "video": args.video,
+        "mic": micPid != nil,
+        "liveDir": args.liveDir ?? NSNull(),
+        "framesDir": keyframes == nil ? NSNull() : (args.framesDir ?? URL(fileURLWithPath: args.outputPath)
+            .deletingPathExtension().path + "-frames"),
+    ])
+
+    // Pausing the mic, from this process's own menu or the agent's.
+    let setMicPaused: ((Bool) -> Void)? = micPid.map { pid in
+        { paused in
+            kill(pid, paused ? SIGUSR1 : SIGUSR2)
+            status.update(["micPaused": paused])
+            fputs("meetey-capture: microphone \(paused ? "paused" : "resumed")\n", stderr)
+        }
+    }
+
+    // The agent's controls arrive as signals: SIGUSR1/SIGUSR2 pause and resume
+    // the mic, SIGHUP is Keep Recording. SIGTERM (stop) is handled above.
+    var controlSources: [DispatchSourceSignal] = []
+    for (sig, action) in [(SIGUSR1, { setMicPaused?(true) }), (SIGUSR2, { setMicPaused?(false) }),
+                          (SIGHUP, { keepRecording() })] as [(Int32, () -> Void)] {
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+        source.setEventHandler(handler: action)
+        source.resume()
+        controlSources.append(source)
+    }
+
     // Bound as a `let` before the polling Tasks capture it: a captured `var`
     // crossing into concurrent code is a data race, and an error under Swift 6.
     let indicator: RecordingIndicator? = await {
         guard args.menuBar else { return nil }
         let menuLabel = args.label
         let capturingVideo = args.video
-        let onMicPaused: ((Bool) -> Void)? = micPid.map { pid in
-            { paused in
-                kill(pid, paused ? SIGUSR1 : SIGUSR2)
-                fputs("meetey-capture: microphone \(paused ? "paused" : "resumed")\n", stderr)
-            }
-        }
+        let onMicPaused = setMicPaused
         let made = await MainActor.run {
             RecordingIndicator(label: menuLabel, startedAt: startedAt,
                                capturingVideo: capturingVideo,
@@ -2701,6 +2566,7 @@ func record(args: Args) async throws {
                     monitor.resetCandidate()
                     announced = false
                     fputs("meetey-capture: keeping the recording — call-end clock restarted\n", stderr)
+                    status.update(.recording)
                     await MainActor.run { indicator?.setState(.recording) }
                     continue
                 }
@@ -2733,9 +2599,11 @@ func record(args: Args) async throws {
                         fputs("meetey-capture: microphone released but audio continued — still recording\n", stderr)
                         monitor.resetCandidate()
                         announced = false
-                        await MainActor.run { indicator?.setState(.recording) }
+                        status.update(.recording)
+                    await MainActor.run { indicator?.setState(.recording) }
                         continue
                     }
+                    status.update(.stopping)
                     await MainActor.run { indicator?.setState(.stopping) }
                     trimLock.withLock { trimToBytes = cutTo }
                     let trimmed = writer.seconds(forDataBytes: mark - cutTo)
@@ -2746,9 +2614,9 @@ func record(args: Args) async throws {
                 // Surface a pending stop while it is still reversible, rather
                 // than letting the recording end out of nowhere.
                 let pending = monitor.remaining(at: Date())
-                await MainActor.run {
-                    indicator?.setState(pending.map { .endingSoon(remaining: $0) } ?? .recording)
-                }
+                let shown: RecordingIndicator.State = pending.map { .endingSoon(remaining: $0) } ?? .recording
+                status.update(shown)
+                await MainActor.run { indicator?.setState(shown) }
 
                 if monitor.isArmed && !everArmed {
                     everArmed = true
@@ -2782,6 +2650,8 @@ func record(args: Args) async throws {
     }
 
     for await _ in stopStream { break }
+    status.update(.stopping)
+    _ = controlSources
 
     // The mic helper finishes its own file; give it a moment to do so.
     if let micPid {
@@ -2822,23 +2692,24 @@ func record(args: Args) async throws {
         let result = keyframes.finalize()
         fputs("meetey-capture: wrote \(result.count) keyframe(s)\(result.truncated ? " (truncated at limit)" : "")\n", stderr)
     }
+    status.remove()
     fputs("meetey-capture: recording saved to \(args.outputPath)\n", stderr)
 }
 
 // Entry point
 let args = Args.parse()
 
-/// Owns the watcher indicator for the process's lifetime. A main-actor singleton
+/// Owns the menu bar agent for the process's lifetime. A main-actor singleton
 /// rather than a global var, so the reference is created and held on the actor
 /// that AppKit requires.
 @MainActor
 final class IndicatorHost {
     static let shared = IndicatorHost()
-    private var indicator: WatcherIndicator?
+    private var agent: MenuBarAgent?
 
-    func start(stateFile: String, plistPath: String?) -> Bool {
-        indicator = WatcherIndicator(stateFile: stateFile, plistPath: plistPath)
-        return indicator != nil
+    func start(statusFile: String, healthFile: String?, plistPath: String?) -> Bool {
+        agent = MenuBarAgent(statusFile: statusFile, healthFile: healthFile, plistPath: plistPath)
+        return agent != nil
     }
 }
 
@@ -2875,11 +2746,12 @@ Task {
             exit(0)
         } else if args.watchIndicator {
             let ok = await MainActor.run {
-                IndicatorHost.shared.start(stateFile: args.stateFile,
+                IndicatorHost.shared.start(statusFile: args.statusFile ?? defaultStatusFile,
+                                           healthFile: args.healthFile,
                                            plistPath: args.plistPath.isEmpty ? nil : args.plistPath)
             }
             if !ok {
-                fputs("meetey-capture: no GUI session — no watcher indicator\n", stderr)
+                fputs("meetey-capture: no GUI session — no menu bar agent\n", stderr)
                 exit(0)
             }
             // Held by IndicatorHost for the life of the process; AppKit drives it.
@@ -2915,10 +2787,10 @@ Task {
                                             before believing it (default 600)
                   --menu-bar                Show a menu bar indicator with a Stop
                                             Recording item while recording
-                  --watch-indicator         Run only a menu bar item for the watch
-                                            agent (used by the agent itself)
-                  --state-file <path>       Active-recording state the indicator
-                                            watches, to stand aside while recording
+                  --watch-indicator         Run Meetey's menu bar icon (used by the
+                                            watch agent)
+                  --status-file <path>      Where a capture publishes its state for
+                                            the menu bar icon
                   --label <text>            What to call this recording in the menu
                   --display <id>            Display to capture (default: the one
                                             showing the target app)

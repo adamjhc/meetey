@@ -167,7 +167,7 @@ Full transcript: [`<notes-stem>-transcript.md`] · [N] words · [model]
 Call `get_status` and report:
 - If active: "Recording in progress since [startedAt] — session [sessionId]." Add "Capturing screen content." when `capturingVideo` is true.
 - If `pendingWriteUp` or `autoStopped` is true: a recording has finished and is waiting. Say so — naming `windowTitle` when there is one, and `autoStopReason` when it explains why it ended — and offer to run `/meetey stop` now. Never report "no recording active" in this state; the audio is sitting there and the user almost certainly wants it.
-- If `startedBy` is `watch`, the meeting watcher started it after the user confirmed — say "Recording [windowTitle], started by the meeting watcher." `/meetey stop` works on it normally.
+- If `startedBy` is `watch`, the user started it from Meetey's menu bar icon — say "Recording [windowTitle], started from the menu bar." `/meetey stop` works on it normally.
 - If inactive: "No recording active."
 
 This is about the *live* recording only. For the health of the install, use `/meetey doctor`.
@@ -289,36 +289,36 @@ just finished. `writeup` is for the pile that accumulated while nobody was looki
 
 ## `/meetey watch`
 
-Turns the meeting watcher on and off. The watcher is a background agent that notices
-meetings in Chrome, Zoom, and Teams and **asks** before recording — it never starts a
-recording on its own, and the prompt lets the user pick audio only or audio + screen.
+Turns Meetey's menu bar icon on and off (the "watch agent"). Its icon turns orange while
+Chrome, Zoom or Teams is in a call, and **clicking it records** audio and screen. Nothing is
+detected and offered, and nothing records without that click. The same icon shows every
+recording, including ones started with `/meetey start`, with Stop, mic pause and the
+assistant in its menu.
 
 - `/meetey watch` with no argument → `watcher_status`. Report whether it is on, in one
-  line. If it is on, mention that it asks before recording; the user should not have to
-  wonder whether something is being captured silently. If `canSeeWindows` is `false`,
-  lead with that — the watcher is running and will never notice a meeting until node is
-  granted Screen Recording permission.
-- `/meetey watch on` → `enable_watcher`. It verifies the agent can actually see windows
-  before reporting success, so a `permissionNeeded` error is the expected first-run
-  outcome rather than a failure to work around — relay its `fix` verbatim and don't
-  retry. On success, say what it will now do and that `/meetey watch off` reverses it.
-- `/meetey watch off` → `disable_watcher`. If a recording is in progress, say plainly that
-  it will be stopped and saved: stopping the watcher tears down everything it started, so
-  the recording ends too. It is finalised rather than lost, but someone doing this
-  mid-meeting needs to know their recording is ending.
-- `/meetey watch log` → `watcher_log`. Use this when the watcher is on but never seems to
-  ask. Check `watcher_status`'s `canSeeWindows` first, though — `false` means node is
-  missing Screen Recording permission and the watcher will never notice anything, which
-  the log only hints at.
+  line. If it is on, mention that it records only when clicked. If `canSeeWindows` is
+  `false`, lead with that — node has no Screen Recording permission, so a recording
+  started from the icon can't capture anything.
+- `/meetey watch on` → `enable_watcher`. It verifies the agent has Screen Recording
+  permission before reporting success, so a `permissionNeeded` error is the expected
+  first-run outcome rather than a failure to work around — relay its `fix` verbatim and
+  don't retry. On success, say what it will now do and that `/meetey watch off` reverses it.
+- `/meetey watch off` → `disable_watcher`. If a recording it started is in progress, say
+  plainly that it will be stopped and saved: turning it off tears down everything it
+  started, so the recording ends too. It is finalised rather than lost, but someone doing
+  this mid-meeting needs to know their recording is ending.
+- `/meetey watch log` → `watcher_log`. Use this when clicking the icon didn't record.
+  Check `watcher_status`'s `canSeeWindows` first, though.
 
 **Only enable it when asked.** It installs a login agent that persists across restarts,
 so it is not something to switch on helpfully because a user just missed a recording —
 offer it, and let them answer. Turning it *off* on request needs no such hesitation.
 
 **How a recording ends.** It stops when the app quits, or when the call itself ends —
-detected by the meeting app releasing the microphone, then confirmed over ten quiet
-minutes before anything is committed, with the recording trimmed back to when the call
-actually finished. Closing a window does not end it. Describe it in those terms rather
+detected by the meeting app releasing the microphone, then confirmed for a few seconds
+(the meeting window gone too), a minute (only the mic released) or ten minutes (when the
+app's own mic use can't be read) before anything is committed, with the recording
+trimmed back to when the call actually finished. Closing a window does not end it. Describe it in those terms rather
 than promising it "knows when your meeting is over": a call that keeps the microphone
 open, or a participant who never unmutes, will run on until the app quits.
 
@@ -340,10 +340,10 @@ a silent or empty recording rather than an error, so it is the likeliest cause o
 "meetey recorded nothing" complaint.
 
 If asked about recording meetings automatically, describe what actually exists: an
-optional watcher (`/meetey watch on`, or `npx adamjhc/meetey watch enable` in a terminal —
-there is no bare `meetey` command on PATH) that notices meetings in Chrome,
-Zoom, and Teams and **asks** before recording, offering audio only or audio + screen. It is off until enabled and
-never records on its own. A recording ends when the call ends or the app quits, and the
+optional menu bar icon (`/meetey watch on`, or `npx adamjhc/meetey watch enable` in a
+terminal — there is no bare `meetey` command on PATH) that turns orange while Chrome,
+Zoom or Teams is in a call; one click records audio and screen. It is off until enabled
+and never records on its own. A recording ends when the call ends or the app quits, and the
 transcript is written automatically; `/meetey writeup` adds the notes for anything
 recorded while the user was away.
 

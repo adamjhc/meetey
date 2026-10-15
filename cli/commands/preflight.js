@@ -87,19 +87,17 @@ export async function preflight() {
     const file = join(dir, "token.txt");
     writeFileSync(file, token);
     try {
-      const sonnet = await roundTrip(claude, {
-        model: "sonnet",
+      // The model the panel will use; there is no in-panel switch to test.
+      const run = await roundTrip(claude, {
+        model: config.model,
         tools: config.tools.join(","),
         allowedTools: "Read Grep Glob",
         addDirs: [dir],
         prompt: `Use the Read tool to read ${file} and reply with only its contents.`,
         cwd: config.workingDirectory,
       });
-      report("Sonnet + tools", sonnet, (text) => text.includes(token), problems, true);
-      reportMcpServers(sonnet);
-
-      const opus = await roundTrip(claude, { model: "opus", tools: "", prompt: "Reply with exactly: OK", cwd: dir });
-      report("Opus", opus, (text) => /\bOK\b/.test(text), problems, false);
+      report(`${config.model} + tools`, run, (text) => text.includes(token), problems, true);
+      reportMcpServers(run);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

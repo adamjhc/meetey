@@ -29,9 +29,9 @@ import {
   deleteRecording, getRecording, listRecordings, searchRecordings, systemStatus,
 } from "./library.js";
 import {
-  readActive, writeActive, clearActive, readPending, writePending, clearPending,
+  readActive, writeActive, clearActive, readPending, writePending, clearPending, captureStatusPath,
 } from "./session-state.js";
-import { watchStatus, enableWatch, disableWatch, watchLog } from "./watch-agent.js";
+import { watchStatus, enableWatch, disableWatch, watchLog, watchAgentRunning } from "./watch-agent.js";
 import { readUpdateCache, compareVersions } from "./update-check.js";
 
 // --- Config ---
@@ -307,9 +307,13 @@ function startRecording({
   // A menu bar item with a Stop Recording command. As much a standing "this is
   // recording" indicator as a control — every other signal Meetey gives is a
   // moment in time, and this one lasts the whole meeting.
-  if (menuBar !== false) {
-    args.push("--menu-bar", "--label", label || APP_NAMES[bundleID] || "Meeting");
-  }
+  //
+  // When the watch agent runs, its one icon shows every recording from the
+  // status file, so the capture adds no second icon: a menu bar manager files
+  // each newly added item as hidden, which is how the red dot kept vanishing.
+  args.push("--label", label || APP_NAMES[bundleID] || "Meeting");
+  args.push("--status-file", captureStatusPath(MEETEY_DIR));
+  if (menuBar !== false && !watchAgentRunning()) args.push("--menu-bar");
 
   // Video is opt-in per recording. There is deliberately no env var or config
   // file that can turn it on by default — it must be requested every time.
@@ -864,29 +868,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "watcher_status",
       description:
-        "Is the meeting watcher on? The watcher is an optional background agent that notices " +
-        "meetings in Chrome, Zoom, and Teams and asks before recording them. Off by default.",
+        "Is Meetey's menu bar icon (the watch agent) on? An optional login agent whose icon turns " +
+        "orange while Chrome, Zoom or Teams is in a call; clicking it records. Off by default.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "enable_watcher",
       description:
-        "Turn the meeting watcher on. It installs a login agent that persists across restarts " +
-        "until disabled, so only call this when the user has actually asked for it — never to " +
-        "be helpful after a missed recording. It records audio only, and always asks first.",
+        "Turn Meetey's menu bar icon (the watch agent) on. It installs a login agent that persists " +
+        "across restarts until disabled, so only call this when the user has actually asked for it — " +
+        "never to be helpful after a missed recording. It records only when the user clicks the icon.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "disable_watcher",
       description:
-        "Turn the meeting watcher off. Does not stop a recording already in progress.",
+        "Turn Meetey's menu bar icon (the watch agent) off. A recording it started is stopped and " +
+        "saved first.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "watcher_log",
       description:
-        "Recent watcher activity — what it noticed, what was recorded, what was declined. " +
-        "The place to look when the watcher is on but never seems to ask.",
+        "Recent watch agent activity — recordings requested from the menu bar icon, how they " +
+        "ended, transcription. The place to look when clicking the icon didn't record.",
       inputSchema: {
         type: "object",
         properties: {
@@ -910,7 +915,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description:
               "Show a menu bar indicator while recording, with a Stop Recording item (default " +
               "true). It is also the only continuously visible sign that recording is happening, " +
-              "so leave it on unless the user asks otherwise.",
+              "so leave it on unless the user asks otherwise. When the watch agent is on, its icon " +
+              "shows the recording instead of a second one.",
           },
           label: {
             type: "string",

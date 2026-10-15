@@ -1,6 +1,6 @@
 # Implementation Plan: Live Assistant
 
-Status: **built (2.5.0), awaiting real-call testing**. See "Remaining" at the end.
+Status: **built (2.5.0–2.7.0), tested on real calls**. See "Remaining" at the end.
 Branch: `live-assistant` (fork: `adamjhc/meetey`)
 
 ## Goal
@@ -22,10 +22,10 @@ work laptop this is the company Claude account.
 
 | Topic | Decision | Why |
 |---|---|---|
-| Start | Keep the watcher's one-click prompt. Every recording writes live files and opens the assistant (changed from a separate "live" choice) | Live files stay local; meeting text reaches Claude only when the user asks, so recording consent is unchanged |
+| Start | Click the orange menu bar icon (2.7.0; was the watcher's prompt). Every recording writes live files and opens the assistant | Live files stay local; meeting text reaches Claude only when the user asks, so recording consent is unchanged |
 | Live ASR | Apple SpeechAnalyzer / SpeechTranscriber | True streaming, on-device, beats `base.en` on conversational WER |
 | Mic | Capture it, second transcriber, label lines `Me` / `Them` | Your side of the call, with no diarization |
-| Model | Sonnet 5.5 default, Opus 5.5 toggle | Latency matters mid-call |
+| Model | Sonnet default, set in `~/.meetey/config.json` (2.7.0; was an in-panel toggle) | Latency matters mid-call; nothing to fiddle with in the panel |
 | Context | Panel builds the delta itself from the live files | Saves a tool-call round trip per question |
 | Tools | Read-only by default | Call audio and screen OCR are untrusted input |
 
@@ -213,9 +213,7 @@ Not built:
   runs in their code folder (`~/.meetey/config.json`), rather than a separate
   allowlist. Acting on meeting content is forbidden by the system prompt, and the
   user's permissions refuse anything not already allowed.
-- **Configurable model names**, in case an organisation restricts models. The
-  aliases `sonnet` / `opus` are hard-coded; `preflight` confirmed both work on
-  the work account.
+- ~~Configurable model names.~~ **Done in 2.7.0:** `assistant --model <name>`.
 - `get_live_context` MCP tool: not needed by the panel, which keeps the
   conversation and can Read the live files from its working directory. Only
   useful for asking from an ordinary Claude Code session mid-meeting.
@@ -225,22 +223,20 @@ Not built:
 Needs a real call:
 
 - Live transcript accuracy on jargon against the Whisper transcript of the same
-  meeting; latency; echo on speakers; live screen text.
-- The panel: opens on recording start, takes typing without taking focus from
-  Teams, **invisible in screen shares**, streaming, Opus switch, *Extract logs* on a
-  real shared log.
-- The watcher's repeat prompt after a decline: probably fixed by 2.5.1's
-  `callsHandled` (a call isn't re-offered until Teams releases the mic).
+  meeting; latency; echo on speakers.
+- The panel on the work laptop: takes typing without taking focus from Teams,
+  streaming. (Invisible in screen shares: verified.)
+- Keyframes during a real Teams screen share: none appeared in one test call.
+  Deferred; believed to work.
 
-Fixed since 2.5.0, awaiting confirmation on the laptop:
+Verified on a real Teams call on the dev Mac (2.6.x): mic + call recording, live
+transcript, call end detected and trimmed within 5s, panel hidden from capture.
 
-- **2.5.1–2.5.2**: Teams meetings recognised by "not a Teams screen + Teams
-  holds the mic"; new Teams titles are the meeting name only.
-- **2.5.3**: recordings stop 15s after Teams releases the mic and the meeting
-  window closes (60s on the mic alone), instead of ten minutes. Back-to-back
-  calls were being joined.
-- **2.5.4**: the executable is named `Meetey`, so macOS and menu bar managers
-  (Thaw, Tuck) can keep the icons visible. Under `meetey-capture` they matched a
-  stale registration. If the red recording icon still won't stay pinned, the next
-  step is one persistent icon that switches between watching and recording.
+**2.7.0 — one menu bar icon, manual start** (replaces automatic detection):
 
+- The watch agent no longer polls or prompts. Its one icon
+  (`com.adamjhcox.meetey.status`) turns orange while a meeting app holds the mic;
+  a click records audio + screen. Recordings show in that icon (via
+  `capture-status.json`), so there is never a second, newly added item for
+  Tuck/Thaw to hide. Needs confirming under Tuck on the laptop.
+- Panel: no live line, no quick actions, no model picker.

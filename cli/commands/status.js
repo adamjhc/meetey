@@ -60,11 +60,11 @@ export async function status() {
   const watchEnabled = existsSync(WATCH_PLIST);
   // Not a check() — off is a valid state, and the default one.
   const watchNote = watchEnabled
-    ? "on — asks before recording"
+    ? "on — click the menu bar icon to record"
     : watchInstalled
       ? "off — enable: npx adamjhc/meetey watch enable"
       : "off — run update to install it";
-  console.log(`  \x1b[2m\u25cb\x1b[0m  meeting watcher (optional)  \x1b[2m(${watchNote})\x1b[0m`);
+  console.log(`  \x1b[2m\u25cb\x1b[0m  menu bar icon (optional)  \x1b[2m(${watchNote})\x1b[0m`);
 
   // MCP server
   const serverOk = existsSync(`${SERVER_DIR}/index.js`);

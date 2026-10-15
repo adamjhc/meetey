@@ -31,8 +31,9 @@ Commands:
             your microphone, and Claude Code headless on this account
   live      Show the running meeting's transcript and screen text as it happens
   assistant Open the in-call assistant panel for the running (or latest) meeting
-            (--folder <path> sets the code folder Claude works in; --config shows it)
-  watch     Watch for meetings and offer to record them
+            (--folder <path> sets the code folder Claude works in, --model <name>
+            the model it uses; --config shows both)
+  watch     Meetey's menu bar icon: it turns orange in a call, click it to record
             (enable | disable | status | logs)
 
 Examples:

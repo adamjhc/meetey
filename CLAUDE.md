@@ -23,10 +23,10 @@ This builds the Swift binary, downloads the Whisper model, copies the MCP server
 | `npx adamjhc/meetey install` | First-time setup (or `node cli/index.js install` from a local clone) |
 | `npx adamjhc/meetey update` | Rebuild binary, refresh MCP server and skill |
 | `npx adamjhc/meetey status` | Show what's installed and whether everything is wired up |
-| `npx adamjhc/meetey watch enable\|disable\|status\|logs` | Control the meeting watcher (also `/meetey watch` from Claude Code) |
+| `npx adamjhc/meetey watch enable\|disable\|status\|logs` | Control the menu bar icon / watch agent (also `/meetey watch` from Claude Code) |
 | `swift build -c release` | Rebuild the Swift capture binary (run inside `meetey-capture/`) |
 | `.build/release/meetey-capture --selftest` | Keyframe pipeline + auto-stop, no permission needed |
-| `node daemon/watch.js --selftest` | Meeting-detection patterns |
+| `node daemon/watch.js --selftest` | Menu bar record commands → capture arguments |
 | `node mcp-server/index.js` | Run the MCP server manually for debugging |
 | `node cli/index.js update` | From a clone: rebuild, re-assemble and re-sign `~/.meetey/Meetey.app` |
 
@@ -73,121 +73,77 @@ The admin tools were reachable by natural language from the start; the subcomman
 
 ## The watch agent
 
-**`daemon/watch.js`** — a launchd LaunchAgent that notices meetings and *asks*
-whether to record them. Off until `npx adamjhc/meetey watch enable`; `disable`, `status`, and
-`logs` round out the CLI (`cli/commands/watch.js`).
+**`daemon/watch.js`** — a launchd LaunchAgent that keeps **Meetey's one menu bar
+icon** running and starts a recording when it's clicked. Off until
+`npx adamjhc/meetey watch enable`; `disable`, `status`, and `logs` round out the CLI
+(`cli/commands/watch.js`). The names (`watch`, `*_watcher` tools) predate 2.7.0 and
+were kept for compatibility.
 
-**A meeting's identity is its window *and* its normalised title**, not the window
-alone. Window-only meant a second meeting started in the same Chrome window read as
-already handled and was silently never offered — an instant Meet after an earlier
-call simply never prompted. Title-only flickers, because Chrome adds and removes a
-🔊 marker while a tab plays audio. Both together are stable within a call and
-distinct across calls; `normalizeTitle` strips the decoration.
+**Nothing is detected and offered any more.** Until 2.6 it polled `--list-windows`,
+matched titles against `MEETING_PATTERNS`, and asked in a `display dialog`. The user
+replaced that with manual activation: the icon turns orange when a meeting app is in a
+call, and **a left click on the orange icon records audio + screen** (right-click opens
+the menu). There is no audio-only choice in the icon; `/meetey start --audio-only`
+still exists. Consent is the click, made on the spot for one call, and the icon is red
+for as long as the recording lasts.
 
-**It never starts a recording on its own.** Every recording it produces was
-authorised by someone choosing a capture mode in a dialog naming the specific window.
-That is what makes it safe for detection to be loose: a false positive costs one
-dismissed dialog, so `MEETING_PATTERNS` is deliberately generous. Do not "tighten"
-those patterns into silence — a missed meeting is unrecoverable, a spurious
-prompt is not. Run `node daemon/watch.js --selftest` after touching them.
+**`MenuBarAgent.swift`** (`meetey-capture --watch-indicator --status-file …
+--health-file … --plist …`) is the icon. A separate process because a status item
+needs AppKit, which Node cannot reach. Every second it decides between:
 
-**Teams meetings are recognised by the mic, not just the title.** New Teams names
-a meeting window after the meeting ("TAM Onyx Stand-up | Microsoft Teams"), with
-no "meeting" or "call" in it, so no title pattern can tell it from a popped-out
-chat. `teamsMeeting` therefore
-counts any Teams window that is not one of Teams' own screens (`TEAMS_SECTIONS`:
-Chat, Calendar, …) while **Teams is taking audio input**. `--list-windows` reports
-that per window as `appUsingMic`: the app's own pid, a process sharing its bundle
-prefix, or any process it is responsible for, since web-view apps do audio in
-helpers. Unknown mic state errs towards offering. `callsHandled` then keeps a
-call that was offered (recorded or skipped) from being offered again under a new
-window or title until Teams lets go of the mic.
+| State | Symbol | Source |
+|---|---|---|
+| Idle | `circle.dotted`, template | — |
+| Ready | `smallcircle.filled.circle`, orange | `MeetingDetector`: a supported app holds the mic |
+| Starting | `record.circle`, red, "…" | a record command was sent, no status yet (20s) |
+| Recording / ending soon / stopping | as in "Menu bar indicator" below | `capture-status.json` |
 
-The prompt offers three choices — `Skip` / `Audio + screen` / `Audio only` — and
-screen capture is **scoped to the window the watcher detected**, which is narrower
-than `/meetey start`'s default. Consent stays per-recording: the agent proposes,
-the person decides, in the same dialog that authorises the audio.
-
-Withholding the screen option did not make anything safer. It meant a meeting
-worth capturing visually could not be, without abandoning the prompt and starting
-over from Claude Code — and the copy at the time promised "a separate prompt" that
-no code path ever produced.
-
-The **default button is the safe one** (`Skip`), against the usual
-"default is rightmost" convention. An unprompted alert that can take focus
-mid-call must not turn an absent-minded Return into a recording. Having a default
-at all matters for keyboard users: with none, no button holds focus, which can
-leave the affirmative choices mouse-only when Full Keyboard Access is off.
+- **Ready** is Core Audio process state (`Microphone.processesUsingInput` /
+  `appUsesInput`) plus CoreGraphics window metadata for the meeting window — never
+  ScreenCaptureKit, so it is safe every second, during a recording too. Teams' own
+  screens (`teamsSections`: Chat, Calendar, …) are never the meeting window. Without
+  Screen Recording there are no titles and the app's name is used.
+- **Starting a recording** is a JSON line on the icon's stdout
+  (`{"cmd":"record","mode":"screen","bundleID","windowID","title"}`), which
+  `watch.js` validates (`parseCommand`) and turns into capture arguments
+  (`captureArgs`, both covered by `--selftest`). The daemon spawns the capture, not
+  the icon, so the capture keeps the Screen Recording attribution it has always had:
+  the launchd job's node.
+- **Controlling a recording** is signals to the capture pid from the status file:
+  SIGTERM stops, SIGUSR1/SIGUSR2 pause/resume the mic, SIGHUP is Keep Recording. So
+  the icon controls any recording, including one started from Claude Code.
+- **`capture-status.json`** (`CaptureStatus.swift`, `captureStatusPath`) is written by
+  every capture given `--status-file` — the watcher and `start_recording` always pass
+  it — and removed when it ends. The icon trusts it only while the pid is alive.
+- **One icon, never removed.** `autosaveName = com.adamjhcox.meetey.status`. Menu bar
+  managers (Thaw, Tuck, Ice) file every *newly added* item as hidden; the old design
+  added a red icon per recording and removed/re-added the watching icon around it, so
+  both kept vanishing. `start_recording` therefore passes `--menu-bar` only when
+  `watchAgentRunning()` is false. Don't reintroduce a second item or a stand-aside.
+- It exits when `getppid()` becomes 1 (a crashed daemon would otherwise leave a
+  second icon after launchd restarts it). The daemon restarts a dead icon with
+  backoff. **Turn Off Meetey** removes the plist and boots the job out.
 
 `enable_watcher` **verifies before reporting success**: it bootstraps the agent, waits
-for the agent to report what it can see, and tears the install back down if it is blind.
-The check has to come from the agent, not the installer — Screen Recording permission is
-granted per *responsible process*, so `--list-windows` from a terminal is attributed to
-the terminal while the same binary under launchd is attributed to the agent's node. A
-check performed by the CLI can pass while the thing it just installed cannot see
-anything. Without this, enabling prints a confident success message and the watcher then
-logs one line every ten seconds into a file nobody was told to open.
-`state/watch-health.json` carries the verdict, and `watchMessage` is pure so all six
-states — including running-but-blind, which needs a real LaunchAgent and a revoked
-permission to reproduce — are covered by tests.
+for the icon to write `state/watch-health.json`, and tears the install back down if
+node lacks Screen Recording. The icon checks with `CGPreflightScreenCaptureAccess()`,
+which asks TCC about its *responsible* process — the job's node — without opening a
+capture connection. A check from the CLI would be attributed to the terminal and could
+pass while the agent can't record. `watchMessage` is pure so every state, including
+running-without-permission, is covered.
 
 Transcription uses `spawn`, not `execFileSync`. A synchronous whisper run blocks Node's
-event loop for minutes, during which the poll never fires and a meeting starting right
-after one ends is missed. Back-to-back calls are ordinary, not an edge case.
+event loop for minutes, during which a record command from the icon would go unread.
 
-`parseDialogChoice` compares button titles exactly rather than by regex — the `+`
-in `Audio + screen` is a metacharacter, and a pattern that silently failed to match
-would start an audio-only recording for someone who asked for their screen.
-`--selftest` covers every reply shape, including a timeout naming the default
-button (which is still not consent).
+A LaunchAgent, not a LaunchDaemon: a menu bar item needs the user's GUI session, and
+this must never run for a user who is not logged in.
 
-A LaunchAgent, not a LaunchDaemon: `display dialog` needs the user's GUI session,
-and this must never run for a user who is not logged in. Notification *action
-buttons* would need a signed `.app` bundle, but `display dialog` gives a real
-modal with buttons from a plain CLI, which is why the confirm-first design is
-cheap. `giving up after` returns `gave up:true` *with the default button still
-named*, so the timeout must be checked before the button — a prompt nobody
-answered is not consent.
-
-**The watcher's menu bar indicator** — `meetey-capture --watch-indicator`, spawned by
-the agent and killed with it. A status item needs AppKit, which Node cannot reach,
-so it is a separate process; it is subordinate, and the watcher runs fine without
-it.
-
-Deliberately the quiet counterpart to `RecordingIndicator`: a monochrome
-`circle.dotted` against that one's solid red. Watching and recording are different
-things to be told, and a second attention-grabbing icon would weaken the only
-continuously-visible signal that a recording is happening.
-
-**It is still while idle.** Motion is at the seams only — settling in on launch,
-standing aside when a recording starts, returning when it ends. 500ms entrances,
-375ms exits (leaving is quicker than arriving), ease-out-quart, no bounce. A menu
-bar icon that moves for hours is animation fatigue: between state changes there is
-nothing to communicate, so nothing moves.
-`NSWorkspace.accessibilityDisplayShouldReduceMotion` is honoured — someone who
-asked the system to stop animating has asked us too.
-
-Standing aside means `isVisible = false`, not just zero alpha. Fading to
-transparent hides the icon but **keeps its slot**, so the recording indicator
-arrives into a bar one item fuller than it looks — and on a crowded bar macOS
-silently drops what does not fit, which is the newest item, which is the red dot.
-This shipped broken: the red indicator stopped appearing entirely. Fade first,
-release the slot on completion; on the way back, take the slot before fading in or
-there is nothing to fade.
-
-**Stopping the watcher stops everything it started.** `launchctl bootout` tears down
+**Stopping the agent stops everything it started.** `launchctl bootout` tears down
 the whole job, and the capture process is in that process group, so it dies too —
 mid-write, with no pending record and nothing queued to transcribe. The SIGTERM
 handler therefore ends a running capture *cleanly* and waits for it to finalize its
 WAV before exiting, bounded at 15s because launchd escalates to SIGKILL on its own
 schedule. The audio is the irreplaceable thing; everything else can be redone.
-
-For the same reason, "any recording already in progress keeps running" was wrong
-and is gone from the copy.
-
-It exits when `getppid()` becomes 1. A clean stop signals it, but a crash does not,
-and launchd then restarts the agent and starts a *second* indicator — two icons
-claiming the same thing, one of them lying.
 
 **`mcp-server/whisper.js`** — resolves `whisper-cli` to an absolute path. Calling it
 by bare name works from Claude Code, which inherits a login shell's PATH, and fails
@@ -226,8 +182,9 @@ get a byte-identical result is minutes wasted.
 
 ## Menu bar indicator
 
-`--menu-bar` (on by default from `start_recording`, and always for watcher-started
-recordings) puts an `NSStatusItem` in the menu bar for the life of the recording:
+`--menu-bar` (on by default from `start_recording` **when the watch agent isn't
+running**; with it running, the agent's one icon shows the recording instead — see
+"The watch agent") puts an `NSStatusItem` in the menu bar for the life of the recording:
 a record icon, the elapsed time, and a **Stop Recording** item wired to the same
 `fireOnce()` path as SIGTERM.
 
@@ -260,14 +217,12 @@ inside the bundle; `BUILT_BINARY` is the build output, **deleted** once copied.
 Every launcher must point at the bundle: the watcher's plist sets
 `MEETEY_BINARY`, and the fallbacks in `daemon/watch.js` and
 `mcp-server/index.js` resolve to `../Meetey.app/…`. In 2.1.2–2.1.4 the watcher
-fell back to the build output, so its icons still had no identity. Both
-indicators set an `autosaveName` (`com.adamjhcox.meetey.status.recording` /
-`.status.watching`) so they are told apart, and assert `isVisible = true` at start
-because named items persist visibility — the watcher's hides itself during a
-recording and must not come back hidden. (Notification *action
-buttons* are the thing that genuinely requires bundling — see the watch agent,
-which uses `display dialog` for that reason. Plain `display notification` needs no
-bundle either, which is how the post-stop notice is posted.)
+fell back to the build output, so its icons still had no identity. Each icon sets
+an `autosaveName` (`com.adamjhcox.meetey.status` for the agent's,
+`.status.recording` for a capture's own) and asserts `isVisible = true` at start,
+because named items persist visibility. (Notification *action buttons* are the
+thing that genuinely requires bundling. Plain `display notification` needs no
+bundle, which is how the post-stop notice is posted.)
 
 **The icon must be built with a palette configuration, never left as-is.**
 `NSImage(systemSymbolName:)` returns `isTemplate = true`, and a template image
@@ -313,14 +268,10 @@ so a closed window costs screen content and nothing else.
 
 This was a loop: capture starts scoped to a window, Google Meet recreates that
 window on joining a call, auto-stop sees it gone and kills the recording after the
-grace period, the watcher then offers the same meeting again — every minute,
-indefinitely. Two changes were needed and only one was made: decoupling audio from
-the window in 1.5.2 without also stopping auto-stop from watching it.
-
-The watcher's `handled` set covers **skipped and recorded** windows alike. Marking
-only skips meant a finished recording immediately re-offered the same meeting,
-which is what turned any early stop into a loop. It is cleared when the window goes
-away, so a genuinely new meeting is still offered.
+grace period, the watcher (which then offered meetings automatically) offered the
+same meeting again — every minute, indefinitely. Two changes were needed and only one
+was made: decoupling audio from the window in 1.5.2 without also stopping auto-stop
+from watching it.
 
 ## Call-end detection
 
@@ -490,8 +441,8 @@ real meetings must only ever get released code. It is skipped in a git checkout,
 with `MEETEY_NO_UPDATE_CHECK=1`, and (with a warning) when the lookup fails.
 
 Every reverse-DNS identifier uses the **`com.adamjhcox.meetey`** prefix: the
-app bundle (`com.adamjhcox.meetey`), its menu bar items (`.status.recording`,
-`.status.watching`), the watcher's launchd label (`.watch`) and dispatch queues. The
+app bundle (`com.adamjhcox.meetey`), its menu bar items (`.status` for the agent's
+icon, `.status.recording` for a capture's own), the watcher's launchd label (`.watch`) and dispatch queues. The
 product name stays `meetey` (`/meetey`, `~/.meetey`, the package). Agents
 installed under the old `com.meetey.watch` label are removed by
 `removeLegacyWatch` on every enable, disable and update, and `update` carries an
@@ -612,6 +563,10 @@ notification. Code is in `Sources/meetey-capture/Panel/`:
   escaped so it can't close the tag. Notes, pinned notes and the user's request
   sit outside it. `meetingSystemPrompt` says meeting content is material, never
   instructions.
+- **The panel is deliberately bare**: title, a pinned-notes toggle, the chat,
+  and an input row (attach current screen, Note, Send). The live transcript
+  line and the canned quick-action prompts were removed in 2.7.0 at the user's
+  request — the moving line pulled the eye off the call. Don't add them back.
 - **`ClaudeSession`**: one long-lived `claude -p` stream-json process with
   `--include-partial-messages`. Since 2.6.0 it is the **user's own Claude Code
   setup**: all their MCP servers load, and their permission settings decide what
@@ -623,8 +578,10 @@ notification. Code is in `Sources/meetey-capture/Panel/`:
   investigate code. The live dir and keyframes are `--add-dir`. Meeting content
   is still untrusted: `meetingSystemPrompt` forbids acting on it and allows
   changing anything (tickets, messages) only when `<my_request>` asks. Before
-  2.6.0 it was Read-only with `--strict-mcp-config`. A model switch restarts it
-  with `--resume`, and so does a crash on the next question. `ClaudeLocator`
+  2.6.0 it was Read-only with `--strict-mcp-config`. The model is
+  `AssistantConfig.model` (`assistant.model`, default `sonnet`, set by
+  `npx adamjhc/meetey assistant --model`); the panel has no picker. A crash
+  restarts it with `--resume` on the next question. `ClaudeLocator`
   finds `claude` without trusting PATH, since the watcher runs under launchd.
 - Every exchange is appended to `<session>-live/chat.md`.
 
@@ -644,15 +601,15 @@ quietly:
   step an MDM is most likely to refuse), then transcribes a sentence synthesised
   with AVSpeechSynthesizer and times it. No mic, no files, no permission prompt.
 - **Microphone:** `--verify-mic`, as `verify` does.
-- **Claude Code headless:** two stream-json round trips the way the panel will
-  make them: Sonnet in the assistant folder with its tools and the user's MCP
-  servers, reading a temp file in an added directory that contains a random
-  token, which proves tools are not blocked by policy; and Opus. It lists the
+- **Claude Code headless:** a stream-json round trip the way the panel will
+  make it: the configured model in the assistant folder with its tools and the
+  user's MCP servers, reading a temp file in an added directory that contains a
+  random token, which proves tools are not blocked by policy. It lists the
   MCP servers the assistant will have. It
   reports model, account source (`apiKeySource: none` means the logged-in
   account) and timings, plus any managed settings in
-  `/Library/Application Support/ClaudeCode/`. One short test prompt per model,
-  no meeting content.
+  `/Library/Application Support/ClaudeCode/`. One short test prompt, no
+  meeting content.
 
 ## `--verify` runs the real thing
 
@@ -792,11 +749,9 @@ message into the session and **only fire while Claude Code is focused**. Nothing
 registers a system-wide hotkey, and user-facing copy must not call them "hotkeys" — on
 macOS that word implies global, and someone will try one mid-meeting and get nothing.
 
-This leaves an asymmetry worth knowing: the menu bar item stops a recording from
-anywhere, but nothing starts one without either Claude Code or the watcher offering.
-A global hotkey would need Accessibility permission and an always-running process; the
-watcher is already that process, but a hotkey that silently starts recording is the
-consent posture this project avoids.
+Outside Claude Code, the only way to start a recording is clicking the watch
+agent's menu bar icon. A global hotkey would need Accessibility permission, and one
+that silently starts recording is the consent posture this project avoids.
 
 ## License
 

@@ -26,34 +26,13 @@ struct ChatMessage: Identifiable {
     var streaming = false
 }
 
-struct QuickAction: Identifiable {
-    let id = UUID()
-    let title: String
-    let prompt: String
-    var attachScreen = false
-
-    static let all = [
-        QuickAction(title: "Extract logs",
-                    prompt: "Extract the logs, errors and stack traces shown on screen, verbatim, in a code block, with the [mm:ss] of each screen. If the OCR looks garbled, read the image.",
-                    attachScreen: true),
-        QuickAction(title: "Last 5 min",
-                    prompt: "Summarise the last five minutes in 3–5 bullets: what was discussed, what was decided, who owes what."),
-        QuickAction(title: "Draft ticket",
-                    prompt: "Draft a ticket for the issue being discussed: title, context, evidence (quote any logs or errors), and acceptance criteria. Paste-ready."),
-        QuickAction(title: "Decisions",
-                    prompt: "List the decisions and action items so far, each with [mm:ss] and an owner (Me, Them, or a name if one was said)."),
-    ]
-}
-
 @MainActor
 final class PanelModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var input = ""
     @Published var pinned = ""
     @Published var attachScreen = false
-    @Published var model = "sonnet" { didSet { session?.switchModel(to: model) } }
     @Published var busy = false
-    @Published var liveText = "Waiting for the meeting…"
     @Published var recording = true
 
     let title: String
@@ -76,16 +55,15 @@ final class PanelModel: ObservableObject {
             let config = AssistantConfig.load()
             session = ClaudeSession(claudePath: claudePath, workingDirectory: config.workingDirectory,
                                     readableDirectories: [liveDir.path, framesDir].compactMap { $0 } + config.additionalDirectories,
-                                    tools: config.tools, model: model) { [weak self] event in
+                                    tools: config.tools, model: config.model) { [weak self] event in
                 Task { @MainActor in self?.handle(event) }
             }
         } else {
             messages.append(ChatMessage(role: .status, text: "Claude Code wasn't found, so questions can't be answered. Install it and log in, then reopen the assistant."))
         }
 
-        refreshLive()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshLive() }
+            Task { @MainActor in self?.checkRecording() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -93,35 +71,29 @@ final class PanelModel: ObservableObject {
 
     private var nowMs: Int { Int(Date().timeIntervalSince(startedAt) * 1000) }
 
-    /// The line under the title: what is being said right now, or the last thing said.
-    private func refreshLive() {
+    /// Whether the recording this panel belongs to is still running, for the
+    /// dot beside the title. There is deliberately no live transcript line
+    /// here: it pulled the eye away from the call.
+    private func checkRecording() {
         if let capturePid, kill(capturePid, 0) != 0, errno == ESRCH, recording {
             recording = false
         }
-        let partials = LiveReader.partials(in: context.liveDir)
-        if !partials.isEmpty {
-            liveText = partials.map { "\($0.speaker): \($0.text)" }.joined(separator: "   ")
-        } else if let last = LiveReader.lines(in: context.liveDir).last {
-            liveText = "\(meetingTimestamp(last.startMs)) \(last.speaker): \(last.text)"
-        } else if !recording {
-            liveText = "Recording ended."
-        }
     }
 
-    func send(_ request: String? = nil, attach: Bool? = nil) {
-        let text = (request ?? input).trimmingCharacters(in: .whitespacesAndNewlines)
+    func send() {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !busy, let session else { return }
-        let built = context.build(request: text, pinned: pinned, attachScreen: attach ?? attachScreen, nowMs: nowMs)
+        let built = context.build(request: text, pinned: pinned, attachScreen: attachScreen, nowMs: nowMs)
 
         var detail = [String]()
         if built.newLines > 0 { detail.append("\(built.newLines) new line\(built.newLines == 1 ? "" : "s")") }
         if built.newFrames > 0 { detail.append("\(built.newFrames) screen\(built.newFrames == 1 ? "" : "s")") }
-        if attach ?? attachScreen { detail.append("current screen") }
+        if attachScreen { detail.append("current screen") }
         messages.append(ChatMessage(role: .user, text: text, detail: detail.isEmpty ? nil : "+ " + detail.joined(separator: ", ")))
         messages.append(ChatMessage(role: .assistant, text: "", streaming: true))
         answerIndex = messages.count - 1
         busy = true
-        if request == nil { input = "" }
+        input = ""
         attachScreen = false
         appendLog("**\(meetingTimestamp(nowMs)) You:** \(text)\n\n")
         session.send(built.message)
@@ -228,21 +200,12 @@ struct PanelView: View {
                     .accessibilityLabel(model.recording ? "Recording" : "Recording ended")
                 Text(model.title).font(.headline).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                Picker("Model", selection: $model.model) {
-                    Text("Sonnet").tag("sonnet")
-                    Text("Opus").tag("opus")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .help("Sonnet answers faster; Opus thinks harder. Switching keeps the conversation.")
+                Toggle(isOn: $showPinned) { Image(systemName: showPinned ? "pin.fill" : "pin") }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help("Pinned notes: standing context sent with every question")
+                    .accessibilityLabel("Pinned notes")
             }
-            Text(model.liveText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .truncationMode(.head)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
     }
@@ -271,16 +234,6 @@ struct PanelView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(QuickAction.all) { action in
-                        Button(action.title) { model.send(action.prompt, attach: action.attachScreen) }
-                            .disabled(model.busy)
-                    }
-                    Button(showPinned ? "Hide pinned" : "Pinned notes") { showPinned.toggle() }
-                }
-                .controlSize(.small)
-            }
             if showPinned {
                 TextEditor(text: $model.pinned)
                     .font(.callout)
@@ -503,7 +456,10 @@ enum PanelProcess {
     }
 
     /// Brings the panel for `liveDir` forward, starting it if it isn't running.
-    static func showOrLaunch(liveDir: String, title: String, framesDir: String?, startedAt: Date) {
+    /// `capturePid` is the recording it belongs to: this process when the
+    /// capture opens it, the capture's pid when the menu bar agent does.
+    static func showOrLaunch(liveDir: String, title: String, framesDir: String?, startedAt: Date,
+                             capturePid: pid_t = getpid()) {
         let dir = URL(fileURLWithPath: liveDir)
         if runningPid(dir) != nil {
             DistributedNotificationCenter.default().postNotificationName(
@@ -515,7 +471,7 @@ enum PanelProcess {
         process.executableURL = URL(fileURLWithPath: executable)
         var args = ["--panel", "--live", liveDir, "--title", title,
                     "--started-at", String(Int(startedAt.timeIntervalSince1970 * 1000)),
-                    "--capture-pid", String(getpid())]
+                    "--capture-pid", String(capturePid)]
         if let framesDir { args += ["--frames-dir", framesDir] }
         process.arguments = args
         let log = dir.appendingPathComponent("panel.log")
@@ -566,7 +522,7 @@ func runPanel(liveDir: String, title: String, framesDir: String?, startedAt: Dat
 /// carries only what the previous one didn't, exactly as in the panel. For
 /// testing against `--replay` output.
 @MainActor
-func panelAsk(questions: [String], liveDir: String, framesDir: String?, model: String, claude: String?) async -> Never {
+func panelAsk(questions: [String], liveDir: String, framesDir: String?, model: String?, claude: String?) async -> Never {
     guard let claudePath = ClaudeLocator.find(explicit: claude) else {
         fputs("meetey-capture: Claude Code not found\n", stderr)
         exit(1)
@@ -580,7 +536,7 @@ func panelAsk(questions: [String], liveDir: String, framesDir: String?, model: S
     print("[working in \(config.workingDirectory.path) with \(config.tools.joined(separator: ", "))]")
     let session = ClaudeSession(claudePath: claudePath, workingDirectory: config.workingDirectory,
                                 readableDirectories: [dir.path, framesDir].compactMap { $0 } + config.additionalDirectories,
-                                tools: config.tools, model: model) { event in
+                                tools: config.tools, model: model ?? config.model) { event in
         switch event {
         case .ready(let model): print("[\(model)]")
         case .delta(let text): print(text, terminator: ""); fflush(stdout)

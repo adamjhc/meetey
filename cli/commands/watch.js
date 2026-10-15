@@ -35,13 +35,13 @@ export function watch(sub) {
       console.log(`
 Usage: npx adamjhc/meetey watch <enable|disable|status|log>
 
-  enable    Watch for meetings and offer to record them
-  disable   Stop watching
-  status    Is the watcher running?
-  log       Show recent watcher activity (alias: logs)
+  enable    Put Meetey's icon in the menu bar, starting at login
+  disable   Remove it
+  status    Is it running?
+  log       Show recent activity (alias: logs)
 
-The watcher never records on its own. When it notices a meeting it asks, naming
-the window, and records only if you say yes.
+The icon turns orange while Chrome, Zoom or Teams is in a call. Click it to
+record audio and screen. Nothing records unless you click.
 
 You can also drive this from Claude Code with /meetey watch.
 `);
@@ -56,20 +56,19 @@ function enable() {
     red(result.error);
     if (result.detail) console.log(`  ${result.detail}`);
     if (result.fix) console.log(`\n  ${result.fix}\n`);
-    console.log("  (the watcher was not enabled)\n");
+    console.log("  (Meetey's menu bar icon was not enabled)\n");
     process.exit(1);
   }
 
-  green("Watcher running, and it can see your windows");
+  green("Meetey is in the menu bar");
   console.log(`
-Meetey will now ask before recording when it notices a meeting in Chrome, Zoom,
-or Teams. The prompt offers audio only or audio + screen, and screen capture
-covers just the meeting window.
-
-It starts nothing without you choosing to.
+Its icon turns orange while Chrome, Zoom or Teams is in a call. Click it then to
+record audio and screen; right-click for the menu. Nothing records unless you
+click. Tell your menu bar manager to keep it visible — it's the one icon Meetey
+uses, for recordings too.
 
   npx adamjhc/meetey watch status    Check it
-  npx adamjhc/meetey watch log       See what it has noticed
+  npx adamjhc/meetey watch log       See what it has done
   npx adamjhc/meetey watch disable   Turn it off
 `);
 }
@@ -91,9 +90,9 @@ function status() {
   if (state.enabled) {
     const sight = state.canSeeWindows === null
       ? "not reported yet"
-      : state.canSeeWindows ? "yes" : "NO — it will never notice a meeting";
-    console.log(`  can see windows: ${sight}`);
-    if (state.lastCheck) console.log(`  last checked:    ${state.lastCheck}`);
+      : state.canSeeWindows ? "yes" : "NO — recordings it starts can't capture anything";
+    console.log(`  Screen Recording: ${sight}`);
+    if (state.lastCheck) console.log(`  last checked:     ${state.lastCheck}`);
   }
   console.log(`  plist: ${state.plistPath}`);
   console.log(`  log:   ${state.logPath}`);

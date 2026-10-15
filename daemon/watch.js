@@ -15,30 +15,34 @@
  */
 
 /**
- * The watch agent: notices a meeting, asks whether to record it, and records it
- * if told to.
+ * The watch agent: keeps Meetey's menu bar icon running, and records when it is
+ * told to from there.
  *
- * It never starts a recording on its own. Every recording this agent produces
- * was authorised by someone choosing a capture mode in a dialog naming the
- * specific window — which is what makes it safe for detection to be imperfect. A
- * false positive costs one dismissed dialog; the human is the adjudicator, not
- * the pattern list.
+ * Since 2.7.0 nothing is detected and offered automatically. The icon
+ * (`meetey-capture --watch-indicator`, MenuBarAgent.swift) turns orange when a
+ * meeting app is in a call, and a recording starts only when someone picks
+ * "Record" in its menu. The choice is made on purpose, on the spot, for one
+ * call — the same consent the old dialog asked for, without the dialog
+ * interrupting every call to ask.
  *
- * Screen capture is offered here rather than withheld. The agent proposes; the
- * person decides, in the same breath as authorising the audio. Withholding the
- * option did not make anything safer — it just meant a meeting worth capturing
- * visually could not be, without abandoning the prompt and starting over.
+ * The icon asks this process to start the capture, rather than starting it
+ * itself, so the capture keeps the Screen Recording attribution it has always
+ * had: launchd's job, this node. It writes a JSON line on stdout:
  *
- * Run by launchd as a LaunchAgent (see `meetey watch enable`), which is a user
- * session agent rather than a system daemon — `display dialog` needs a GUI
- * session, and this must never run for a user who is not logged in.
+ *     {"cmd": "record", "mode": "audio" | "screen", "bundleID": "…",
+ *      "windowID": 123, "title": "…"}
+ *
+ * Run by launchd as a LaunchAgent (see `meetey watch enable`), a user session
+ * agent rather than a system daemon — a menu bar icon needs a GUI session, and
+ * this must never run for a user who is not logged in.
  */
 
-import { spawn, execFileSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { spawn } from "child_process";
+import { existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join, resolve } from "path";
-import { readActive, writeActive, clearActive, writePending, activeStatePath } from "../mcp-server/session-state.js";
+import { basename, join, resolve } from "path";
+import { createInterface } from "readline";
+import { readActive, writeActive, clearActive, writePending, captureStatusPath } from "../mcp-server/session-state.js";
 import { writeHealth, watchPaths } from "../mcp-server/watch-agent.js";
 import { resolveWhisper } from "../mcp-server/whisper.js";
 import { micPathFor, writeSessionTranscript } from "../mcp-server/transcript.js";
@@ -55,185 +59,27 @@ const CAPTURE_BINARY = process.env.MEETEY_BINARY ??
   // installed copy can't import.
   resolve(scriptDir, "../Meetey.app/Contents/MacOS/Meetey");
 
-const POLL_MS = Number(process.env.MEETEY_WATCH_POLL_MS ?? 10_000);
-/** How long a dialog waits before giving up, so an away-from-desk user isn't
- *  ambushed by a stale prompt when they come back. */
-const PROMPT_TIMEOUT_S = 120;
-
-/**
- * Windows that look like a live meeting.
- *
- * Deliberately generous. Missing a meeting means the user never gets asked and
- * loses the recording entirely; over-matching means one dialog they dismiss.
- * The confirmation is what lets these stay loose — do not "tighten" them into
- * silence.
- */
-const MEETING_PATTERNS = [
-  // `^meet\b` rather than requiring a dash: an instant meeting can be titled just
-  // "Meet". \b keeps "Meeting notes" out, since there is no boundary inside
-  // "meeting".
-  { bundleID: "com.google.Chrome", test: (t) => /google meet|meet\.google\.com|^meet\b|zoom\.us\/(j|wc)\/|teams\.microsoft\.com|whereby|meet\.jit\.si/i.test(t) },
-  { bundleID: "us.zoom.xos", test: (t) => /zoom (meeting|webinar)/i.test(t) },
-  { bundleID: "com.microsoft.teams", test: teamsMeeting },
-  // New Teams, which replaced classic Teams and has its own bundle ID.
-  { bundleID: "com.microsoft.teams2", test: teamsMeeting },
-];
-
-/**
- * Teams' own screens: the main window's title starts with the section it is
- * showing ("Chat | Priya Shah | Microsoft Teams", "Calendar | …").
- */
-const TEAMS_SECTIONS = new Set([
-  "activity", "chat", "teams", "calendar", "calls", "files", "apps", "onedrive", "copilot",
-  "communities", "settings", "notifications", "people", "assignments", "approvals", "shifts",
-  "planner", "viva", "help", "search", "microsoft teams",
-]);
-
-/**
- * New Teams names a meeting window after the meeting — "TAM Onyx Stand-up |
- * Microsoft Teams" — with no "meeting" or "call" in it, so the title alone
- * can't tell a meeting from a popped-out chat with "Priya Shah | Microsoft
- * Teams". Whether Teams is taking audio input can, so a window that is not one
- * of Teams' own screens counts as a meeting while Teams holds the mic.
- *
- * Unknown mic state (macOS 13, an unreadable Core Audio query) errs towards
- * offering, per the rule above: a missed meeting can't be recovered, a spurious
- * prompt is one click.
- */
-export function teamsMeeting(title, window = {}) {
-  const section = title.split("|")[0].trim().toLowerCase();
-  if (!section || TEAMS_SECTIONS.has(section)) return false;
-  return window.appUsingMic !== false;
-}
+const SUPPORTED_APPS = new Set(["com.google.Chrome", "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2"]);
 
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 const healthCtx = { meeteyDir: MEETEY_DIR, home: HOME };
 
-/**
- * Windows this agent has already dealt with — skipped **or** recorded.
- *
- * Recording one has to count. Without it, the moment a recording ends the same
- * meeting is offered again, so anything that stops a recording early becomes a
- * prompt-record-stop loop repeating every minute. Skipping and recording are
- * both "handled"; neither should be asked about twice.
- *
- * Cleared when the window goes away, so a genuinely new meeting is offered
- * normally. Persisted because launchd restarts this process on crash, logout and
- * reboot, and an in-memory set means a decision gets re-litigated mid-meeting.
- */
-const HANDLED_PATH = join(MEETEY_DIR, "state", "watch-handled.json");
-
-function loadHandled() {
-  try {
-    return new Set(JSON.parse(readFileSync(HANDLED_PATH, "utf8")));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveHandled() {
-  try {
-    mkdirSync(dirname(HANDLED_PATH), { recursive: true });
-    writeFileSync(HANDLED_PATH, JSON.stringify([...handled]) + "\n");
-  } catch {
-    // Losing this costs one redundant prompt, never a recording.
-  }
-}
-
-const handled = loadHandled();
-/** True while a dialog is on screen — polling must not stack prompts. */
-let prompting = false;
-/** Session we last announced a pause for, so it is said once rather than every tick. */
-let pausedFor = null;
 /** The capture this agent started, if any. Held so shutdown can end it properly. */
 let activeCapture = null;
 
-function listWindows() {
-  if (!existsSync(CAPTURE_BINARY)) return [];
-  try {
-    const out = execFileSync(CAPTURE_BINARY, ["--list-windows"], {
-      encoding: "utf8",
-      timeout: 15_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const windows = JSON.parse(out.trim());
-    writeHealth(healthCtx, { at: new Date().toISOString(), canSeeWindows: true, windowCount: windows.length });
-    return windows;
-  } catch (e) {
-    // Screen Recording permission not granted yet, or the binary is mid-rebuild.
-    // Either way this is a transient condition, not a reason to exit — launchd
-    // would just restart us into the same state.
-    //
-    // But it must not be silent: this is the failure that makes a freshly
-    // enabled watcher look like it simply never sees a meeting.
-    const detail = (e.stderr?.toString() || e.message || "").split("\n")[0];
-    writeHealth(healthCtx, { at: new Date().toISOString(), canSeeWindows: false, error: detail });
-    log(`could not list windows: ${detail}`);
-    return [];
-  }
-}
-
 /**
- * Apps whose current call has already been offered — recorded or skipped.
- *
- * A meeting is keyed by window and title, and Teams changes both mid-call (a
- * window replaced on joining, a title that changes when someone shares), so
- * without this a declined call could be offered again. While the app keeps
- * the mic it is the same call; once it lets go, the call is over and the next
- * one is offered normally.
+ * A command from the menu bar icon, validated: a line that isn't one is
+ * ignored, never guessed at. Returns null for anything else.
  */
-const callsHandled = new Set();
-
-/** Forget calls whose app no longer holds the mic. */
-export function updateCallsHandled(windows) {
-  for (const bundleID of [...callsHandled]) {
-    const stillInCall = windows.some((w) => w.bundleID === bundleID && w.appUsingMic === true);
-    if (!stillInCall) callsHandled.delete(bundleID);
-  }
-}
-
-export function markCallHandled(window) {
-  if (window.appUsingMic) callsHandled.add(window.bundleID);
-}
-
-export function findMeeting(windows) {
-  for (const window of windows) {
-    if (!window.isOnScreen) continue;
-    const pattern = MEETING_PATTERNS.find((p) => p.bundleID === window.bundleID);
-    if (!pattern?.test(window.title ?? "", window)) continue;
-    // A call already offered stays handled while it lasts (see callsHandled).
-    if (window.appUsingMic && callsHandled.has(window.bundleID)) continue;
-    return window;
-  }
-  return null;
-}
-
-/**
- * Chrome decorates titles with transient markers — the 🔊 that appears while a tab
- * plays audio comes and goes mid-call. Stripping them keeps a meeting's identity
- * stable for as long as it runs.
- */
-export function normalizeTitle(title) {
-  return (title ?? "")
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * Identity of a meeting, not of a window.
- *
- * Keyed on the window *and* its title. Window alone survives a title flickering
- * mid-call, but it also means a second meeting started in the same Chrome window
- * is treated as already handled and never offered — which is exactly what
- * happened to an instant Meet started after an earlier call. Title alone flickers.
- * Both together are stable within a meeting and distinct across meetings.
- */
-export const keyFor = (window) =>
-  `${window.bundleID}:${window.windowID}:${normalizeTitle(window.title)}`;
-
-function escapeAppleScript(text) {
-  return text.replace(/[\\"]/g, (c) => `\\${c}`);
+export function parseCommand(line) {
+  let o;
+  try { o = JSON.parse(line); } catch { return null; }
+  if (o?.cmd !== "record") return null;
+  if (o.mode !== "audio" && o.mode !== "screen") return null;
+  if (!SUPPORTED_APPS.has(o.bundleID)) return null;
+  const windowID = Number.isInteger(o.windowID) && o.windowID > 0 ? o.windowID : null;
+  const title = typeof o.title === "string" && o.title.trim() ? o.title.trim() : null;
+  return { mode: o.mode, bundleID: o.bundleID, windowID, title };
 }
 
 const APP_NAMES = {
@@ -243,65 +89,33 @@ const APP_NAMES = {
   "com.microsoft.teams2": "Teams",
 };
 
-export const DECLINE = "Skip";
-export const AUDIO_ONLY = "Audio only";
-export const AUDIO_AND_SCREEN = "Audio + screen";
-
 /**
- * Reads the chosen mode out of osascript's reply.
- *
- * Exact string comparison rather than a regex: the "+" in "Audio + screen" is a
- * regex metacharacter, and a pattern that silently fails to match would start an
- * audio-only recording for someone who asked for their screen.
- *
- * Returns "audio", "screen", or null for declined / timed out / dismissed.
+ * meetey-capture's arguments for a recording. Pure, so the selftest can check
+ * what a menu choice turns into.
  */
-export function parseDialogChoice(output) {
-  // Timing out is not consent.
-  if (/gave up:true/.test(output)) return null;
-  const match = output.match(/button returned:([^,\n]*)/);
-  const choice = match ? match[1].trim() : "";
-  if (choice === AUDIO_ONLY) return "audio";
-  if (choice === AUDIO_AND_SCREEN) return "screen";
-  return null;
-}
-
-function askToRecord(window) {
-  const app = APP_NAMES[window.bundleID] ?? "a meeting app";
-  const title = (window.title ?? "").slice(0, 90);
-  const mic = MIC_ENABLED
-    ? `Your microphone is recorded too, even while you're muted in ${app} — ` +
-      `pause it from the Meetey menu bar icon. `
-    : "";
-  const message =
-    `Meetey noticed a meeting in ${app}:\n\n${title}\n\n` +
-    `Record it? "${AUDIO_AND_SCREEN}" captures only this window. ${mic}The assistant ` +
-    `opens beside the call (⌃⌥M). It stops on ` +
-    `its own when the call ends; run /meetey stop in Claude Code to write up ` +
-    `the notes.`;
-
-  // The default is the *safe* option, not the affirmative one. This alert
-  // appears unprompted and can take focus mid-call, so an absent-minded Return
-  // must not start recording a room full of people. Having a default at all
-  // matters for keyboard users: without one no button holds focus, which can
-  // leave the affirmative choices mouse-only when Full Keyboard Access is off.
-  // It sits leftmost against the usual "default is rightmost" convention —
-  // deliberate, because declining is the safe direction here.
-  const script =
-    `display dialog "${escapeAppleScript(message)}" ` +
-    `buttons {"${DECLINE}", "${AUDIO_AND_SCREEN}", "${AUDIO_ONLY}"} ` +
-    `default button "${DECLINE}" ` +
-    `with title "Meetey" with icon note giving up after ${PROMPT_TIMEOUT_S}`;
-
-  try {
-    return parseDialogChoice(execFileSync("osascript", ["-e", script], {
-      encoding: "utf8",
-      timeout: (PROMPT_TIMEOUT_S + 15) * 1000,
-    }));
-  } catch {
-    // Non-zero means the user hit Escape, or no GUI session is available.
-    return null;
+export function captureArgs({ mode, bundleID, windowID, title }, paths, env = process.env) {
+  const args = [
+    "--app", bundleID,
+    "--output", paths.outputPath,
+    "--auto-stop",
+    // Nobody is watching a recording started from the menu bar, so without this
+    // it runs until the app quits — which for Chrome could be days.
+    "--stop-when-call-ends",
+    // No --menu-bar: the agent's own icon shows the recording, from this file.
+    "--status-file", paths.statusFile,
+    "--label", (title ?? APP_NAMES[bundleID] ?? "Meeting").slice(0, 60),
+  ];
+  // Which window is the meeting, so its closing tells the capture the call is
+  // over — the difference between stopping in seconds and waiting a minute.
+  if (windowID) args.push("--meeting-window", String(windowID), "--meeting-title", title ?? "");
+  if (mode === "screen") {
+    args.push("--video", "--frames-dir", paths.framesDir);
+    if (windowID) args.push("--window", String(windowID));
   }
+  if (paths.micPath) args.push("--mic", paths.micPath);
+  if (paths.liveDir) args.push("--live", paths.liveDir);
+  if (paths.liveDir && env.MEETEY_NO_ASSISTANT !== "1") args.push("--assistant");
+  return args;
 }
 
 /** Mic recording follows the same default as /meetey start. */
@@ -371,46 +185,32 @@ function transcribeInBackground(wavPath) {
   next(0);
 }
 
-function startRecording(window, mode) {
+function startRecording(request) {
+  // One recording at a time, whoever started it. The icon only offers Record
+  // when nothing is recording, but a recording started from Claude Code in the
+  // same second could still race it.
+  const already = readActive(MEETEY_DIR);
+  if (already) {
+    log(`not recording — ${already.sessionId} is already in progress`);
+    return;
+  }
+
+  const { mode, bundleID, title } = request;
   const sessionId = `meetey-${Date.now()}`;
   const outputPath = join(RECORDINGS_DIR, `${sessionId}.wav`);
-  const framesDir = mode === "screen" ? join(RECORDINGS_DIR, `${sessionId}-frames`) : null;
-  const micPath = MIC_ENABLED ? micPathFor(outputPath) : null;
-  const liveDir = process.env.MEETEY_NO_LIVE === "1" ? null : livePathFor(outputPath);
+  const paths = {
+    outputPath,
+    framesDir: mode === "screen" ? join(RECORDINGS_DIR, `${sessionId}-frames`) : null,
+    micPath: MIC_ENABLED ? micPathFor(outputPath) : null,
+    liveDir: process.env.MEETEY_NO_LIVE === "1" ? null : livePathFor(outputPath),
+    statusFile: captureStatusPath(MEETEY_DIR),
+  };
+  const { framesDir, micPath, liveDir } = paths;
   mkdirSync(RECORDINGS_DIR, { recursive: true });
 
-  // Screen capture is still consented to per recording — the agent offers, the
-  // person chooses, in the same dialog that authorises the audio. And it scopes
-  // to the window the watcher actually detected, which is narrower than what
-  // /meetey start captures by default.
-  const args = [
-    "--app", window.bundleID,
-    "--output", outputPath,
-    "--auto-stop",
-    // Matters more here than anywhere: nobody is watching a recording the agent
-    // started, so without this it runs until the app quits — which for Chrome
-    // could be days.
-    "--stop-when-call-ends",
-    // And a recording nobody explicitly started is exactly the one that most
-    // needs a visible indicator and a way to stop it without hunting for a
-    // terminal.
-    "--menu-bar", "--label", (window.title ?? "Meeting").slice(0, 60),
-    // Which window is the meeting, so its closing tells the capture the call is
-    // over — the difference between stopping in seconds and waiting minutes.
-    "--meeting-window", String(window.windowID),
-    "--meeting-title", window.title ?? "",
-  ];
-
-  if (framesDir) {
-    args.push("--video", "--frames-dir", framesDir, "--window", String(window.windowID));
-  }
-  if (micPath) args.push("--mic", micPath);
-  if (liveDir) args.push("--live", liveDir);
-  if (liveDir && process.env.MEETEY_NO_ASSISTANT !== "1") args.push("--assistant");
-
-  const child = spawn(CAPTURE_BINARY, args, { stdio: ["ignore", "ignore", "pipe"] });
+  const child = spawn(CAPTURE_BINARY, captureArgs(request, paths), { stdio: ["ignore", "ignore", "pipe"] });
   activeCapture = child;
-
+  const windowTitle = title ?? APP_NAMES[bundleID] ?? "";
   let autoStopReason = null;
   let confirmedStart = false;
   let micDenied = false;
@@ -457,10 +257,10 @@ function startRecording(window, mode) {
     liveDir,
     startedAt,
     startedBy: "watch",
-    windowTitle: window.title ?? "",
-    bundleID: window.bundleID,
+    windowTitle,
+    bundleID,
   });
-  log(`recording ${sessionId} (${mode === "screen" ? "audio + screen" : "audio"}${micPath ? " + mic" : ""}) — ${window.title}`);
+  log(`recording ${sessionId} (${mode === "screen" ? "audio + screen" : "audio"}${micPath ? " + mic" : ""}) — ${windowTitle}`);
 
   child.on("exit", (code, signal) => {
     activeCapture = null;
@@ -489,7 +289,7 @@ function startRecording(window, mode) {
       startedAt,
       stoppedAt: new Date().toISOString(),
       startedBy: "watch",
-      windowTitle: window.title ?? "",
+      windowTitle,
       autoStopReason,
     });
 
@@ -498,263 +298,157 @@ function startRecording(window, mode) {
 }
 
 /**
- * New Teams' meeting window titles have not been checked against real calls, so
- * its pattern may miss meetings — and a missed meeting is unrecoverable. Each
- * distinct New Teams title the pattern did *not* match is logged once, so
- * `watch log` after a missed meeting shows what the pattern should have caught.
- * New Teams only: logging every Chrome tab title would be noise.
- */
-const unmatchedSeen = new Set();
-const LOG_UNMATCHED_FOR = new Set(["com.microsoft.teams2"]);
-
-function logUnmatchedTitles(windows, meeting) {
-  for (const window of windows) {
-    if (window === meeting || !LOG_UNMATCHED_FOR.has(window.bundleID) || !window.isOnScreen) continue;
-    // Matched but held back because its call was already offered: not news.
-    if (MEETING_PATTERNS.find((p) => p.bundleID === window.bundleID)?.test(window.title ?? "", window)) continue;
-    const title = normalizeTitle(window.title);
-    if (!title || unmatchedSeen.has(title)) continue;
-    unmatchedSeen.add(title);
-    const mic = window.appUsingMic === undefined || window.appUsingMic === null ? "unknown" : window.appUsingMic ? "in use" : "not in use";
-    log(`not treated as a meeting — ${APP_NAMES[window.bundleID]}: "${title}" (Teams mic: ${mic})`);
-  }
-}
-
-async function tick() {
-  if (prompting) return;
-
-  // NOTHING may touch the capture subsystem while a recording is running.
-  //
-  // `--list-windows` opens its own connection to macOS's capture service, and a
-  // second connection from the same app displaces the first: the live recording
-  // dies with "application connection being interrupted". Polling for windows
-  // every ten seconds meant every recording died at the first tick after it
-  // started — roughly eight seconds in, whether or not screen capture was on.
-  //
-  // An earlier version of this function listed windows first so health kept
-  // updating during a recording. That observability nicety destroyed the thing it
-  // was reporting on. A recording in progress is itself proof the capture path
-  // works, so health is written from that instead of probing for it.
-  const active = readActive(MEETEY_DIR);
-  if (active) {
-    if (pausedFor !== active.sessionId) {
-      pausedFor = active.sessionId;
-      log(`recording ${active.sessionId} in progress — window checks paused until it ends`);
-    }
-    writeHealth(healthCtx, {
-      at: new Date().toISOString(),
-      canSeeWindows: true,
-      note: `recording ${active.sessionId} — window checks paused`,
-    });
-    return;
-  }
-
-  pausedFor = null;
-  const windows = listWindows();
-  updateCallsHandled(windows);
-  const meeting = findMeeting(windows);
-  logUnmatchedTitles(windows, meeting);
-
-  // Forget declines for windows that are gone, so the next meeting in a reused
-  // window asks again.
-  const live = new Set(windows.map(keyFor));
-  let pruned = false;
-  for (const key of handled) if (!live.has(key)) { handled.delete(key); pruned = true; }
-  if (pruned) saveHandled();
-
-  if (!meeting || handled.has(keyFor(meeting))) return;
-
-  prompting = true;
-  try {
-    const mode = askToRecord(meeting);
-    // Marked before the branch: recording a window counts as handling it just as
-    // much as skipping does, and forgetting that is what created the loop.
-    handled.add(keyFor(meeting));
-    markCallHandled(meeting);
-    saveHandled();
-    if (mode) {
-      startRecording(meeting, mode);
-    } else {
-      log(`skipped — ${meeting.title} [window ${meeting.windowID}]`);
-    }
-  } finally {
-    prompting = false;
-  }
-}
-
-/**
- * Detection is the part most likely to need tuning against real meetings, so it
- * is exercisable without one. `node watch.js --selftest`.
+ * The parts that decide what gets recorded are exercisable without a meeting.
+ * `node watch.js --selftest`.
  */
 function selfTest() {
-  const w = (bundleID, title, extra = {}) =>
-    ({ bundleID, title, windowID: 1, isOnScreen: true, ...extra });
-
-  const shouldMatch = [
-    w("com.google.Chrome", "Weekly Sync - Google Meet"),
-    w("com.google.Chrome", "Meet – abc-defg-hij"),
-    w("com.google.Chrome", "Launch review | Microsoft Teams — teams.microsoft.com"),
-    w("us.zoom.xos", "Zoom Meeting"),
-    w("us.zoom.xos", "Zoom Webinar"),
-    w("com.microsoft.teams", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true }),
-    // Real new-Teams meeting windows: named after the meeting, nothing else.
-    w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true }),
-    w("com.microsoft.teams2", "Web Monitoring - Grafana Faro/Sentry | Microsoft Teams", { appUsingMic: true }),
-    // Mic state unknown: offered, since missing a meeting is the worse mistake.
-    w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams"),
-  ];
-  const instant = [
-    // An instant meeting can be titled just "Meet" — no dash to match on.
-    w("com.google.Chrome", "Meet"),
-    w("com.google.Chrome", "Meet - abc-defg-hij"),
-    w("com.google.Chrome", "meet.google.com/abc-defg-hij"),
-  ];
-  for (const window of instant) {
-    if (!findMeeting([window])) failures.push(`missed instant meeting: "${window.title}"`);
-  }
-
-  const shouldNotMatch = [
-    w("com.google.Chrome", "Inbox (48) - Gmail"),
-    w("com.google.Chrome", "meetey/README.md at main"),
-    w("us.zoom.xos", "Zoom"),                    // the idle app window, not a call
-    w("com.microsoft.teams2", "Calls | Microsoft Teams"), // the Calls tab, not a call
-    // Teams' own screens, even mid-call.
-    w("com.microsoft.teams2", "Chat | Priya Shah | Microsoft Teams", { appUsingMic: true }),
-    w("com.microsoft.teams2", "Calendar | Calendar | Microsoft Teams", { appUsingMic: true }),
-    w("com.microsoft.teams2", "Microsoft Teams", { appUsingMic: true }),
-    // A popped-out chat while Teams isn't in a call — even one that says "call".
-    w("com.microsoft.teams2", "Priya Shah | Microsoft Teams", { appUsingMic: false }),
-    w("com.microsoft.teams2", "Call notes | Microsoft Teams", { appUsingMic: false }),
-    w("com.apple.Safari", "Zoom Meeting"),       // unsupported app
-    w("com.google.Chrome", "Google Meet", { isOnScreen: false }), // minimised
-  ];
-
   const failures = [];
-  for (const window of shouldMatch) {
-    if (!findMeeting([window])) failures.push(`missed: ${window.bundleID} "${window.title}"`);
-  }
-  for (const window of shouldNotMatch) {
-    if (findMeeting([window])) failures.push(`false positive: ${window.bundleID} "${window.title}"`);
-  }
-  // A handled call is not offered again while Teams keeps the mic — even under
-  // a new window or title — and the next call is offered once it lets go.
-  const inCall = w("com.microsoft.teams2", "TAM Onyx Stand-up | Microsoft Teams", { appUsingMic: true, windowID: 7 });
-  markCallHandled(inCall);
-  const renamed = w("com.microsoft.teams2", "TAM Onyx Stand-up (sharing) | Microsoft Teams", { appUsingMic: true, windowID: 8 });
-  if (findMeeting([renamed])) failures.push("call: re-offered a call already handled");
-  updateCallsHandled([w("com.microsoft.teams2", "Chat | Microsoft Teams", { appUsingMic: false })]);
-  if (!findMeeting([renamed])) failures.push("call: next call not offered after the mic was released");
+  const cmd = (o) => JSON.stringify({ cmd: "record", ...o });
 
-  // The first on-screen match wins, so an unrelated window must not shadow one.
-  const mixed = [w("com.google.Chrome", "Inbox (48) - Gmail"), w("us.zoom.xos", "Zoom Meeting")];
-  if (findMeeting(mixed)?.bundleID !== "us.zoom.xos") {
-    failures.push("did not find a meeting behind an unrelated window");
+  const good = parseCommand(cmd({ mode: "screen", bundleID: "com.microsoft.teams2", windowID: 42, title: " TAM Onyx Stand-up | Microsoft Teams " }));
+  if (good?.mode !== "screen" || good.windowID !== 42 || good.title !== "TAM Onyx Stand-up | Microsoft Teams") {
+    failures.push(`valid command misread: ${JSON.stringify(good)}`);
   }
+  // No window: recording "anyway" from the menu, or no Screen Recording permission.
+  const bare = parseCommand(cmd({ mode: "audio", bundleID: "us.zoom.xos" }));
+  if (bare?.windowID !== null || bare.title !== null) failures.push(`command without a window misread: ${JSON.stringify(bare)}`);
 
-  // Meeting identity. Keyed on window alone, a second meeting in the same Chrome
-  // window reads as already handled and is never offered — which is what happened
-  // to an instant Meet started after an earlier call.
-  const winA = { bundleID: "com.google.Chrome", windowID: 7, title: "Meet - First call" };
-  const winB = { bundleID: "com.google.Chrome", windowID: 7, title: "Meet - Second call" };
-  if (keyFor(winA) === keyFor(winB)) {
-    failures.push("a different meeting in the same window shares a key — it would never be offered");
-  }
-
-  // ...but the same meeting must keep one identity while Chrome flickers its
-  // audio indicator on and off, or the loop comes back.
-  const quiet = { bundleID: "com.google.Chrome", windowID: 7, title: "Meet - First call" };
-  const loud = { bundleID: "com.google.Chrome", windowID: 7, title: "Meet - First call 🔊" };
-  if (keyFor(quiet) !== keyFor(loud)) {
-    failures.push("the audio indicator changes a meeting's key — it would be re-offered mid-call");
-  }
-  if (normalizeTitle("Meet - Run the Business 🔊  ") !== "Meet - Run the Business") {
-    failures.push(`normalizeTitle left decoration: "${normalizeTitle("Meet - Run the Business 🔊  ")}"`);
-  }
-
-  // Choice parsing. Getting this wrong records the wrong thing silently — the
-  // "+" in "Audio + screen" is a regex metacharacter, so a pattern-based reader
-  // would quietly fall through to audio for someone who asked for their screen.
-  const choices = [
-    [`button returned:${AUDIO_ONLY}, gave up:false`, "audio"],
-    [`button returned:${AUDIO_AND_SCREEN}, gave up:false`, "screen"],
-    [`button returned:${DECLINE}, gave up:false`, null],
-    // A timeout names the default button; it is still not consent.
-    [`button returned:${DECLINE}, gave up:true`, null],
-    [`button returned:${AUDIO_AND_SCREEN}, gave up:true`, null],
-    ["", null],
-    ["something unexpected", null],
+  const rejected = [
+    "",
+    "not json",
+    "meetey-capture: some stray log line",
+    JSON.stringify({ cmd: "stop" }),
+    cmd({ mode: "video", bundleID: "us.zoom.xos" }),
+    cmd({ mode: "audio", bundleID: "com.apple.Safari" }),
+    cmd({ mode: "audio" }),
   ];
-  for (const [output, expected] of choices) {
-    const got = parseDialogChoice(output);
-    if (got !== expected) {
-      failures.push(`choice "${output}" parsed as ${got}, expected ${expected}`);
-    }
+  for (const line of rejected) {
+    if (parseCommand(line)) failures.push(`accepted a bad command: ${line}`);
+  }
+
+  const paths = {
+    outputPath: "/r/s.wav", framesDir: "/r/s-frames", micPath: "/r/s-mic.wav",
+    liveDir: "/r/s-live", statusFile: "/st/capture-status.json",
+  };
+  const has = (args, ...seq) => args.some((_, i) => seq.every((v, j) => args[i + j] === v));
+
+  const screen = captureArgs(good, paths, {});
+  for (const seq of [
+    ["--app", "com.microsoft.teams2"], ["--stop-when-call-ends"], ["--auto-stop"],
+    ["--status-file", "/st/capture-status.json"], ["--meeting-window", "42"],
+    ["--video", "--frames-dir", "/r/s-frames"], ["--window", "42"],
+    ["--mic", "/r/s-mic.wav"], ["--live", "/r/s-live"], ["--assistant"],
+  ]) {
+    if (!has(screen, ...seq)) failures.push(`screen recording is missing ${seq.join(" ")}`);
+  }
+  // One icon: the capture must not add its own.
+  if (screen.includes("--menu-bar")) failures.push("capture would add a second menu bar icon");
+
+  // Audio only means no screen, whatever else is known.
+  const audio = captureArgs({ ...good, mode: "audio" }, { ...paths, framesDir: null }, {});
+  if (audio.includes("--video") || audio.includes("--window")) failures.push("audio-only recording would capture the screen");
+
+  const noWindow = captureArgs(bare, { ...paths, framesDir: null }, {});
+  if (noWindow.includes("--meeting-window")) failures.push("passed a meeting window that was never found");
+  if (!has(noWindow, "--label", "Zoom")) failures.push("recording without a window is not labelled with the app");
+
+  if (captureArgs(good, paths, { MEETEY_NO_ASSISTANT: "1" }).includes("--assistant")) {
+    failures.push("MEETEY_NO_ASSISTANT=1 did not turn the assistant off");
   }
 
   if (failures.length === 0) {
-    console.log(`selftest: PASS (${shouldMatch.length + instant.length} matched, ${shouldNotMatch.length} correctly ignored, meeting identity stable, ${choices.length} dialog choices parsed)`);
+    console.log(`selftest: PASS (${2 + rejected.length} commands parsed, capture arguments checked)`);
     process.exit(0);
   }
   for (const f of failures) console.error(`selftest: FAIL — ${f}`);
   process.exit(1);
 }
 
+/**
+ * The menu bar icon. A separate process because a status item needs AppKit,
+ * which Node has no access to. It is the agent's whole interface, so if it
+ * dies it is started again — with a growing delay, so a machine with no GUI
+ * session doesn't spin.
+ */
+let indicator = null;
+let shuttingDown = false;
+let restartDelay = 2_000;
+
+function startIndicator() {
+  if (!existsSync(CAPTURE_BINARY)) {
+    writeHealth(healthCtx, { at: new Date().toISOString(), canSeeWindows: false, error: `Meetey not found at ${CAPTURE_BINARY}` });
+    log(`Meetey not found at ${CAPTURE_BINARY} — no menu bar icon`);
+    return;
+  }
+  const { plistPath, healthPath } = watchPaths(healthCtx);
+  const started = Date.now();
+  const child = spawn(CAPTURE_BINARY, [
+    "--watch-indicator",
+    "--status-file", captureStatusPath(MEETEY_DIR),
+    "--health-file", healthPath,
+    "--plist", plistPath,
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  indicator = child;
+
+  createInterface({ input: child.stdout }).on("line", (line) => {
+    const request = parseCommand(line);
+    if (!request) {
+      if (line.trim()) log(`ignored from the menu bar icon: ${line.slice(0, 200)}`);
+      return;
+    }
+    log(`record requested from the menu bar (${request.mode === "screen" ? "audio + screen" : "audio"}) — ${request.title ?? request.bundleID}`);
+    startRecording(request);
+  });
+  child.stderr.on("data", (d) => process.stderr.write(d));
+  child.on("error", (e) => log(`menu bar icon failed to start: ${e.message.split("\n")[0]}`));
+  child.on("exit", (code, signal) => {
+    if (indicator === child) indicator = null;
+    if (shuttingDown) return;
+    // Ran for a while: a one-off crash, so come back quickly.
+    if (Date.now() - started > 60_000) restartDelay = 2_000;
+    log(`menu bar icon exited (${signal ?? `exit ${code}`}) — restarting in ${restartDelay / 1000}s`);
+    setTimeout(startIndicator, restartDelay).unref?.();
+    restartDelay = Math.min(restartDelay * 2, 300_000);
+  });
+}
+
 if (process.argv.includes("--selftest")) {
   selfTest();
 } else {
-  /**
- * The agent's menu bar presence, for exactly as long as the agent runs.
- *
- * A separate process because a status item needs AppKit, which Node has no
- * access to — meetey-capture already owns that code. It is subordinate: if it
- * fails to start or dies, the watcher carries on regardless. An indicator that
- * could take the watcher down would be worse than no indicator.
- */
-function startIndicator() {
-  if (!existsSync(CAPTURE_BINARY)) return null;
-  const { plistPath } = watchPaths(healthCtx);
-  const child = spawn(CAPTURE_BINARY, [
-    "--watch-indicator",
-    "--state-file", activeStatePath(MEETEY_DIR),
-    "--plist", plistPath,
-  ], { stdio: ["ignore", "ignore", "pipe"] });
-  child.stderr.on("data", (d) => process.stderr.write(d));
-  child.on("error", (e) => log(`indicator failed to start: ${e.message.split("\n")[0]}`));
-  return child;
-}
+  log("meetey watch started");
+  startIndicator();
+  // Keeps the process alive between recordings; everything else is events.
+  setInterval(() => {}, 1 << 30);
 
-log(`meetey watch started (poll ${POLL_MS}ms)`);
-const indicator = startIndicator();
   // A recording is stopped by the meeting ending, never by the agent exiting.
   process.on("SIGTERM", () => {
-  log("meetey watch stopping");
-  // The indicator means "the watcher is running", so it must not outlive it.
-  try { indicator?.kill("SIGTERM"); } catch { /* already gone */ }
+    log("meetey watch stopping");
+    shuttingDown = true;
+    // The icon means "Meetey is running", so it must not outlive it.
+    try { indicator?.kill("SIGTERM"); } catch { /* already gone */ }
 
-  // A recording in flight has to be ended properly, not abandoned.
-  //
-  // `launchctl bootout` tears down the whole job, and the capture process is in
-  // this process group, so it dies with us — mid-write, with no pending record
-  // and nothing queued to transcribe. The audio is the one irreplaceable thing
-  // here, so shutdown waits for the capture to finalize its WAV before exiting.
-  if (activeCapture) {
-    log("stopping the recording in progress before exiting");
-    try { activeCapture.kill("SIGTERM"); } catch { /* already gone */ }
-    activeCapture.once("exit", () => {
-      log("recording finalized; exiting");
-      process.exit(0);
-    });
-    // launchd escalates to SIGKILL after its own grace period; leaving early
-    // would defeat the point, but hanging forever would too.
-    setTimeout(() => {
-      log("capture did not exit in time; exiting anyway");
-      process.exit(0);
-    }, 15_000);
-    return;
-  }
+    // A recording in flight has to be ended properly, not abandoned.
+    //
+    // `launchctl bootout` tears down the whole job, and the capture process is in
+    // this process group, so it dies with us — mid-write, with no pending record
+    // and nothing queued to transcribe. The audio is the one irreplaceable thing
+    // here, so shutdown waits for the capture to finalize its WAV before exiting.
+    if (activeCapture) {
+      log("stopping the recording in progress before exiting");
+      try { activeCapture.kill("SIGTERM"); } catch { /* already gone */ }
+      activeCapture.once("exit", () => {
+        log("recording finalized; exiting");
+        process.exit(0);
+      });
+      // launchd escalates to SIGKILL after its own grace period; leaving early
+      // would defeat the point, but hanging forever would too.
+      setTimeout(() => {
+        log("capture did not exit in time; exiting anyway");
+        process.exit(0);
+      }, 15_000);
+      return;
+    }
 
-  process.exit(0);
-});
-  setInterval(() => { tick().catch((e) => log(`tick failed: ${e.message}`)); }, POLL_MS);
-  tick().catch((e) => log(`tick failed: ${e.message}`));
+    process.exit(0);
+  });
 }

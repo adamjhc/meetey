@@ -33,11 +33,13 @@ import { which } from "../utils.js";
 
 const CONFIG_PATH = join(MEETEY_DIR, "config.json");
 const DEFAULT_TOOLS = ["Read", "Grep", "Glob", "Bash"];
+const DEFAULT_MODEL = "sonnet";
 const expand = (p) => (p.startsWith("~") ? join(homedir(), p.slice(1)) : p);
 
 /**
  * The assistant's settings, as the panel reads them (AssistantConfig.swift):
- * the code folder Claude runs in, extra readable folders, and built-in tools.
+ * the code folder Claude runs in, extra readable folders, built-in tools, and
+ * the model.
  * Local to this machine and never committed.
  */
 export function assistantConfig() {
@@ -51,7 +53,16 @@ export function assistantConfig() {
     configuredDirectory: configured,
     additionalDirectories: (raw.additionalDirectories ?? []).map(expand),
     tools: raw.tools?.length ? raw.tools : DEFAULT_TOOLS,
+    model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : DEFAULT_MODEL,
   };
+}
+
+function setAssistantSetting(key, value) {
+  let config = {};
+  try { config = JSON.parse(readFileSync(CONFIG_PATH, "utf8")); } catch {}
+  config.assistant = { ...(config.assistant ?? {}), [key]: value };
+  mkdirSync(MEETEY_DIR, { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
 }
 
 function setFolder(folder) {
@@ -60,23 +71,35 @@ function setFolder(folder) {
     console.log(`${path} isn't a folder.`);
     return false;
   }
-  let config = {};
-  try { config = JSON.parse(readFileSync(CONFIG_PATH, "utf8")); } catch {}
-  config.assistant = { ...(config.assistant ?? {}), workingDirectory: path };
-  mkdirSync(MEETEY_DIR, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+  setAssistantSetting("workingDirectory", path);
   console.log(`The assistant now works in ${path}. Panels opened from now on use it.`);
   return true;
 }
 
+/**
+ * Any name `claude --model` takes — `sonnet`, `opus`, or a full model ID. Not
+ * checked here: `preflight` runs a real question on it.
+ */
+function setModel(model) {
+  setAssistantSetting("model", model);
+  console.log(`The assistant now uses ${model}. Panels opened from now on use it; run \`npx adamjhc/meetey preflight\` to check it answers.`);
+  return true;
+}
+
 export async function assistant(target, rest = []) {
-  // `assistant --folder <path>` sets where Claude runs; `assistant --config` shows it.
+  // `assistant --folder <path>` sets where Claude runs, `--model <name>` what
+  // it runs; `assistant --config` shows both.
   if (target === "--folder") {
     if (!rest[0]) { console.log("Usage: npx adamjhc/meetey assistant --folder <path>"); return false; }
     return setFolder(rest[0]);
   }
+  if (target === "--model") {
+    if (!rest[0]?.trim()) { console.log("Usage: npx adamjhc/meetey assistant --model <sonnet|opus|model-id>"); return false; }
+    return setModel(rest[0].trim());
+  }
   if (target === "--config") {
     const c = assistantConfig();
+    console.log(`Model: ${c.model}`);
     console.log(`Folder: ${c.workingDirectory}${c.configuredDirectory && c.configuredDirectory !== c.workingDirectory ? `  (configured ${c.configuredDirectory} doesn't exist)` : ""}`);
     if (c.additionalDirectories.length) console.log(`Also readable: ${c.additionalDirectories.join(", ")}`);
     console.log(`Built-in tools: ${c.tools.join(", ")}, plus your Claude Code MCP servers. Your permission settings decide what may run.`);

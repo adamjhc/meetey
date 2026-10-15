@@ -167,6 +167,11 @@ function plistBody({ nodePath, scriptPath, logPath, captureBinary }) {
 `;
 }
 
+/** Whether the agent — and so Meetey's menu bar icon — is running. */
+export function watchAgentRunning() {
+  return isLoaded();
+}
+
 function isLoaded(label = WATCH_LABEL) {
   try {
     execFileSync("launchctl", ["print", `gui/${process.getuid()}/${label}`], { stdio: "ignore" });
@@ -272,12 +277,12 @@ export function watchStatus({ meeteyDir, home }) {
 export function watchMessage({ available, installed, running, canSeeWindows }) {
   if (!available) return "The watch agent is not installed. Run: npx adamjhc/meetey update";
   if (installed && running && canSeeWindows === false) {
-    return "The watcher is running but cannot see any windows — it will never notice a meeting. " +
-      "Node needs Screen Recording permission in System Settings → Privacy & Security.";
+    return "Meetey's menu bar icon is running but has no Screen Recording permission — recordings " +
+      "it starts can't capture anything. Allow node in System Settings → Privacy & Security → Screen Recording.";
   }
-  if (installed && running) return "The watcher is running. It asks before recording anything.";
-  if (installed) return "The watcher is installed but not running — enable it again to restart it.";
-  return "The watcher is off.";
+  if (installed && running) return "Meetey's menu bar icon is running. It records only when you click it.";
+  if (installed) return "Meetey's menu bar icon is installed but not running — enable it again to restart it.";
+  return "Meetey's menu bar icon is off.";
 }
 
 /**
@@ -319,11 +324,10 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progress
     };
   }
 
-  // Wait for the agent to report what it can actually see. Declaring success
-  // without this is how a watcher ends up installed, running, and permanently
-  // blind — the failure logs one line every ten seconds and shows the user
-  // nothing at all.
-  const spinner = progress("Checking it can see your windows", { stream: progressStream });
+  // Wait for the agent's icon to report whether it may record the screen.
+  // Declaring success without this is how an agent ends up installed, running,
+  // and unable to record anything — which nobody finds out until a meeting is lost.
+  const spinner = progress("Checking it can record", { stream: progressStream });
   const reported = waitFor(
     25_000,
     () => readHealth({ meeteyDir, home }) !== null,
@@ -339,12 +343,12 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progress
 
     return {
       error: !reported
-        ? "The watcher started but never reported in. Check the log: " + paths.logPath
-        : "The watcher cannot see any windows, so it would never notice a meeting.",
+        ? "Meetey's menu bar icon started but never reported in. Check the log: " + paths.logPath
+        : "Meetey's menu bar icon has no Screen Recording permission, so it couldn't record a meeting.",
       permissionNeeded: !reported ? undefined : true,
       detail: health?.error ?? undefined,
       fix:
-        "Node needs Screen Recording permission, separately from meetey-capture. " +
+        "Node needs Screen Recording permission, separately from Meetey: the agent runs under it. " +
         "System Settings → Privacy & Security → Screen Recording → enable node, " +
         "then run this again.",
       enabled: false,
@@ -356,8 +360,8 @@ export function enableWatch({ meeteyDir, home, nodePath, captureBinary, progress
     plistPath: paths.plistPath,
     logPath: paths.logPath,
     message:
-      "The watcher is on and can see your windows. It will ask before recording when it " +
-      "notices a meeting in Chrome, Zoom, or Teams, offering audio only or audio + screen.",
+      "Meetey is in the menu bar. Its icon turns orange while Chrome, Zoom or Teams is in a " +
+      "call; clicking it then records audio and screen. Nothing records unless the user clicks.",
   };
 }
 
@@ -374,7 +378,7 @@ export function disableWatch({ meeteyDir, home }) {
     enabled: false,
     // Stopping the watcher is not stopping a recording. Conflating the two would
     // have someone turn this off mid-meeting and assume their capture ended.
-    message: "The watcher is off. A recording in progress is stopped and saved first — stopping the watcher tears down everything it started, so it is finished properly rather than abandoned.",
+    message: "Meetey's menu bar icon is off. A recording it started is stopped and saved first — turning it off tears down everything it started, so it is finished properly rather than abandoned.",
   };
 }
 

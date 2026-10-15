@@ -18,9 +18,10 @@ import Foundation
 ///
 ///     { "assistant": { "workingDirectory": "~/projects",
 ///                      "additionalDirectories": ["~/other-code"],
-///                      "tools": ["Read", "Grep", "Glob", "Bash"] } }
+///                      "tools": ["Read", "Grep", "Glob", "Bash"],
+///                      "model": "sonnet" } }
 ///
-/// Written by `npx adamjhc/meetey assistant --folder <path>`. Local only, never
+/// Written by `npx adamjhc/meetey assistant --folder <path> --model <name>`. Local only, never
 /// committed: the fork is public and these are paths on a work machine.
 struct AssistantConfig {
     /// Where Claude runs, so it can investigate code the meeting is about. Its
@@ -30,7 +31,12 @@ struct AssistantConfig {
     /// Built-in tools the session gets. No Edit or Write by default: the
     /// assistant investigates during a meeting, it doesn't change code.
     let tools: [String]
+    /// Any name `claude --model` takes: an alias (`sonnet`, `opus`) or a full
+    /// model ID, for an organisation that restricts which models it offers.
+    /// Set here rather than in the panel, so the panel has nothing to fiddle with mid-call.
+    let model: String
 
+    static let defaultModel = "sonnet"
     static let defaultTools = ["Read", "Grep", "Glob", "Bash"]
 
     static func load() -> AssistantConfig {
@@ -54,6 +60,7 @@ struct AssistantConfig {
         return AssistantConfig(
             workingDirectory: URL(fileURLWithPath: working),
             additionalDirectories: (raw["additionalDirectories"] as? [String] ?? []).map(expand),
-            tools: (raw["tools"] as? [String]).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTools)
+            tools: (raw["tools"] as? [String]).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTools,
+            model: (raw["model"] as? String).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? defaultModel)
     }
 }

@@ -93,6 +93,14 @@ export function clearActive(meeteyDir) {
  * Holds the most recent uncollected recording. Earlier ones are not lost: they
  * appear in `list_recordings` as recordings with audio and no notes.
  */
+/**
+ * What a running capture is doing — published by meetey-capture itself
+ * (`--status-file`, CaptureStatus.swift) for the menu bar icon.
+ */
+export function captureStatusPath(meeteyDir) {
+  return join(meeteyDir, "state", "capture-status.json");
+}
+
 export function pendingStatePath(meeteyDir) {
   return join(meeteyDir, "state", "pending.json");
 }
